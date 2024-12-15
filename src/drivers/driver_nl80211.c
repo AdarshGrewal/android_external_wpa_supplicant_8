@@ -2698,6 +2698,20 @@ static int nl80211_mgmt_subscribe_ap_dev_sme(struct i802_bss *bss)
 					   false) < 0)
 			wpa_printf(MSG_DEBUG,
 				   "nl80211: Failed to subscribe to handle Authentication frames - SAE offload may not work");
+
+#ifdef CONFIG_OWE
+		type = (WLAN_FC_TYPE_MGMT << 2) | (WLAN_FC_STYPE_ASSOC_REQ << 4);
+		if (nl80211_register_frame(bss, bss->nl_mgmt, type, NULL, 0,
+					   false) < 0)
+			wpa_printf(MSG_DEBUG,
+					"nl80211: Failed to subscribe to handle assoc req frames");
+
+		type = (WLAN_FC_TYPE_MGMT << 2) | (WLAN_FC_STYPE_REASSOC_REQ << 4);
+		if (nl80211_register_frame(bss, bss->nl_mgmt, type, NULL, 0,
+					   false) < 0)
+			wpa_printf(MSG_DEBUG,
+					"nl80211: Failed to subscribe to handle reassoc req frames");
+#endif
 	}
 
 	nl80211_mgmt_handle_register_eloop(bss);
@@ -3128,6 +3142,10 @@ static u32 wpa_cipher_to_cipher_suite(unsigned int cipher)
 		return RSN_CIPHER_SUITE_WEP40;
 	case WPA_CIPHER_GTK_NOT_USED:
 		return RSN_CIPHER_SUITE_NO_GROUP_ADDRESSED;
+#ifdef CONFIG_WAPI_SUPPORT
+	case WPA_CIPHER_SMS4:
+		return RSN_CIPHER_SUITE_TKIP;
+#endif
 	}
 
 	return 0;
@@ -5005,6 +5023,7 @@ static int nl80211_put_freq_params(struct nl_msg *msg,
 	if (nla_put_u32(msg, NL80211_ATTR_WIPHY_FREQ, freq->freq))
 		return -ENOBUFS;
 
+	wpa_printf(MSG_DEBUG, "  * eht_enabled=%d", freq->eht_enabled);
 	wpa_printf(MSG_DEBUG, "  * he_enabled=%d", freq->he_enabled);
 	wpa_printf(MSG_DEBUG, "  * vht_enabled=%d", freq->vht_enabled);
 	wpa_printf(MSG_DEBUG, "  * ht_enabled=%d", freq->ht_enabled);
@@ -5013,7 +5032,8 @@ static int nl80211_put_freq_params(struct nl_msg *msg,
 	is_24ghz = hw_mode == HOSTAPD_MODE_IEEE80211G ||
 		hw_mode == HOSTAPD_MODE_IEEE80211B;
 
-	if (freq->vht_enabled || (freq->he_enabled && !is_24ghz)) {
+	if (freq->vht_enabled ||
+	    ((freq->he_enabled || freq->eht_enabled) && !is_24ghz)) {
 		enum nl80211_chan_width cw;
 
 		wpa_printf(MSG_DEBUG, "  * bandwidth=%d", freq->bandwidth);
@@ -5097,9 +5117,10 @@ static int nl80211_set_channel(struct i802_bss *bss,
 	int ret;
 
 	wpa_printf(MSG_DEBUG,
-		   "nl80211: Set freq %d (ht_enabled=%d, vht_enabled=%d, he_enabled=%d, bandwidth=%d MHz, cf1=%d MHz, cf2=%d MHz)",
-		   freq->freq, freq->ht_enabled, freq->vht_enabled, freq->he_enabled,
-		   freq->bandwidth, freq->center_freq1, freq->center_freq2);
+		   "nl80211: Set freq %d (ht_enabled=%d, vht_enabled=%d, he_enabled=%d, eht_enabled=%d, bandwidth=%d MHz, cf1=%d MHz, cf2=%d MHz)",
+		   freq->freq, freq->ht_enabled, freq->vht_enabled,
+		   freq->he_enabled, freq->eht_enabled, freq->bandwidth,
+		   freq->center_freq1, freq->center_freq2);
 
 	msg = nl80211_drv_msg(drv, 0, set_chan ? NL80211_CMD_SET_CHANNEL :
 			      NL80211_CMD_SET_WIPHY);
@@ -5245,6 +5266,14 @@ static int wpa_driver_nl80211_sta_add(void *priv,
 			if (nla_put(msg, NL80211_ATTR_HE_6GHZ_CAPABILITY,
 				    sizeof(*params->he_6ghz_capab),
 				    params->he_6ghz_capab))
+				goto fail;
+		}
+
+		if (params->eht_capab) {
+			wpa_hexdump(MSG_DEBUG, "  * eht_capab",
+				    params->eht_capab, params->eht_capab_len);
+			if (nla_put(msg, NL80211_ATTR_EHT_CAPABILITY,
+				    params->eht_capab_len, params->eht_capab))
 				goto fail;
 		}
 
@@ -5688,6 +5717,24 @@ static int nl80211_setup_ap(struct i802_bss *bss)
 	 */
 	if (!drv->device_ap_sme)
 		wpa_driver_nl80211_probe_req_report(bss, 0);
+
+#ifdef CONFIG_MTK_P2P_CONN
+/*
+ * [ALPS05471436] Force disable probe request to sync netlink state with kernel
+ * When setting up an AP, kernel will purge all netlinks (include probe request
+ * reporting nl_preq) associated with the bss. Supplicant thinks its nl_preq
+ * still exists but actually the netlink was already freed by kernel. This bug
+ * will result in the disabling of probe request filter and GO will receive no
+ * probe requests from GC, and then may cause some IOT issues. To resolve this
+ * issue, we should force disable probe request reporting when setting up an AP,
+ * and re-register nl_preq to kernel.
+ */
+	if (drv->device_ap_sme && bss->nl_preq) {
+		wpa_printf(MSG_DEBUG, "nl80211: Force disable Probe Request "
+			"reporting nl_preq=%p", bss->nl_preq);
+		nl80211_destroy_eloop_handle(&bss->nl_preq, 0);
+	}
+#endif
 
 	if (!drv->device_ap_sme && !drv->use_monitor)
 		if (nl80211_mgmt_subscribe_ap(bss))
@@ -11233,6 +11280,8 @@ static int nl80211_qca_do_acs(struct wpa_driver_nl80211_data *drv,
 	     nla_put_flag(msg, QCA_WLAN_VENDOR_ATTR_ACS_HT40_ENABLED)) ||
 	    (params->vht_enabled &&
 	     nla_put_flag(msg, QCA_WLAN_VENDOR_ATTR_ACS_VHT_ENABLED)) ||
+	    (params->eht_enabled &&
+	     nla_put_flag(msg, QCA_WLAN_VENDOR_ATTR_ACS_EHT_ENABLED)) ||
 	    nla_put_u16(msg, QCA_WLAN_VENDOR_ATTR_ACS_CHWIDTH,
 			params->ch_width) ||
 	    add_acs_ch_list(msg, params->freq_list) ||
@@ -11245,9 +11294,10 @@ static int nl80211_qca_do_acs(struct wpa_driver_nl80211_data *drv,
 	nla_nest_end(msg, data);
 
 	wpa_printf(MSG_DEBUG,
-		   "nl80211: ACS Params: HW_MODE: %d HT: %d HT40: %d VHT: %d BW: %d EDMG: %d",
+		   "nl80211: ACS Params: HW_MODE: %d HT: %d HT40: %d VHT: %d EHT: %d BW: %d EDMG: %d",
 		   params->hw_mode, params->ht_enabled, params->ht40_enabled,
-		   params->vht_enabled, params->ch_width, params->edmg_enabled);
+		   params->vht_enabled, params->eht_enabled, params->ch_width,
+		   params->edmg_enabled);
 
 	ret = send_and_recv_msgs(drv, msg, NULL, NULL, NULL, NULL);
 	if (ret) {

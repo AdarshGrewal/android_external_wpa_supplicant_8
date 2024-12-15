@@ -13,6 +13,9 @@
 #include "common/wpa_ctrl.h"
 #include "p2p_i.h"
 #include "p2p.h"
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 
 static struct wpabuf * p2p_build_invitation_req(struct p2p_data *p2p,
@@ -83,6 +86,12 @@ static struct wpabuf * p2p_build_invitation_req(struct p2p_data *p2p,
 		dev_addr = p2p->cfg->dev_addr;
 	p2p_buf_add_group_id(buf, dev_addr, p2p->inv_ssid, p2p->inv_ssid_len);
 	p2p_buf_add_device_info(buf, p2p, peer);
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_p2p_is_ml_capa(p2p)) {
+		ml_p2p_buf_add_ml_capa(buf);
+		ml_p2p_buf_add_ml_prefer_freq_list(buf, p2p);
+	}
+#endif
 	p2p_buf_update_ie_hdr(buf, len);
 
 	p2p_buf_add_pref_channel_list(buf, p2p->pref_freq_list,
@@ -157,6 +166,12 @@ static struct wpabuf * p2p_build_invitation_resp(struct p2p_data *p2p,
 		p2p_buf_add_group_bssid(buf, group_bssid);
 	if (channels)
 		p2p_buf_add_channel_list(buf, p2p->cfg->country, channels);
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_p2p_is_ml_capa(p2p)) {
+		ml_p2p_buf_add_ml_capa(buf);
+		ml_p2p_buf_add_ml_prefer_freq_list(buf, p2p);
+	}
+#endif
 	p2p_buf_update_ie_hdr(buf, len);
 
 #ifdef CONFIG_WIFI_DISPLAY
@@ -375,6 +390,14 @@ fail:
 		bssid = group_bssid;
 	else
 		bssid = NULL;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	p2p->ml_capa = (ml_p2p_is_ml_capa(p2p) && msg.ml_capa) ? true : false;
+	p2p->ml_peer_freq = msg.ml_peer_freq;
+	p2p_dbg(p2p, "ML: Set ml capability: %d, peer freq: %u",
+		p2p->ml_capa, p2p->ml_peer_freq);
+#endif
+
 	resp = p2p_build_invitation_resp(p2p, dev, msg.dialog_token, status,
 					 bssid, reg_class, channel, channels);
 
@@ -527,6 +550,13 @@ void p2p_process_invitation_resp(struct p2p_data *p2p, const u8 *sa,
 				       &intersection);
 		channels = &intersection;
 	}
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	p2p->ml_capa = (ml_p2p_is_ml_capa(p2p) && msg.ml_capa) ? true : false;
+	p2p->ml_peer_freq = msg.ml_peer_freq;
+	p2p_dbg(p2p, "ML: Set ml capability: %d, peer freq: %u",
+		p2p->ml_capa, p2p->ml_peer_freq);
+#endif
 
 	if (p2p->cfg->invitation_result) {
 		int peer_oper_freq = 0;

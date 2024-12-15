@@ -19,6 +19,9 @@
 #include "common/ieee802_11_defs.h"
 #include "common/ieee802_11_common.h"
 #include "driver_nl80211.h"
+#ifdef CONFIG_MTK_COMMON
+#include "mediatek_driver_nl80211.h"
+#endif
 
 static void
 nl80211_control_port_frame_tx_status(struct wpa_driver_nl80211_data *drv,
@@ -171,6 +174,13 @@ static const char * nl80211_command_to_string(enum nl80211_commands cmd)
 	C2S(NL80211_CMD_UNPROT_BEACON)
 	C2S(NL80211_CMD_CONTROL_PORT_FRAME_TX_STATUS)
 	C2S(NL80211_CMD_SET_SAR_SPECS)
+	C2S(NL80211_CMD_OBSS_COLOR_COLLISION)
+	C2S(NL80211_CMD_COLOR_CHANGE_REQUEST)
+	C2S(NL80211_CMD_COLOR_CHANGE_STARTED)
+	C2S(NL80211_CMD_COLOR_CHANGE_ABORTED)
+	C2S(NL80211_CMD_COLOR_CHANGE_COMPLETED)
+	C2S(NL80211_CMD_SET_FILS_AAD)
+	C2S(NL80211_CMD_ASSOC_COMEBACK)
 	C2S(__NL80211_CMD_AFTER_LAST)
 	}
 #undef C2S
@@ -2540,6 +2550,11 @@ static void nl80211_vendor_event(struct wpa_driver_nl80211_data *drv,
 		nl80211_vendor_event_brcm(drv, subcmd, data, len);
 		break;
 #endif /* CONFIG_DRIVER_NL80211_BRCM */
+#ifdef CONFIG_MTK_COMMON
+	case OUI_MTK:
+	        nl80211_vendor_event_mtk(drv, subcmd, data, len);
+	        break;
+#endif
 	default:
 		wpa_printf(MSG_DEBUG, "nl80211: Ignore unsupported vendor event");
 		break;
@@ -2692,6 +2707,11 @@ static void nl80211_external_auth(struct wpa_driver_nl80211_data *drv,
 	event.external_auth.ssid = nla_data(tb[NL80211_ATTR_SSID]);
 
 	event.external_auth.bssid = nla_data(tb[NL80211_ATTR_BSSID]);
+#ifdef CONFIG_MTK_IEEE80211BE
+	event.external_auth.dot11MultiLinkActivated = false;
+	event.external_auth.own_ml_addr = NULL;
+	event.external_auth.peer_ml_addr = NULL;
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	wpa_printf(MSG_DEBUG,
 		   "nl80211: External auth action: %u, AKM: 0x%x",

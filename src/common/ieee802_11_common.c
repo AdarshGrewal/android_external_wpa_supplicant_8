@@ -311,6 +311,21 @@ static int ieee802_11_parse_extension(const u8 *pos, size_t elen,
 		elems->pasn_params = pos;
 		elems->pasn_params_len = elen;
 		break;
+	case WLAN_EID_EXT_EHT_CAPABILITIES:
+		elems->eht_capabilities = pos;
+		elems->eht_capabilities_len = elen;
+		break;
+	case WLAN_EID_EXT_EHT_OPERATION:
+		elems->eht_operation = pos;
+		elems->eht_operation_len = elen;
+		break;
+#ifdef CONFIG_MTK_IEEE80211BE
+	case WLAN_EID_EXT_MULTI_LINK:
+		elems->ml = pos;
+		elems->ml_len = elen;
+		wpa_printf(MSG_DEBUG, "ML: found ML IE(elen=%u)", (unsigned int) elen);
+		break;
+#endif
 	default:
 		if (show_errors) {
 			wpa_printf(MSG_MSGDUMP,
@@ -1912,9 +1927,9 @@ const struct oper_class_map global_op_class[] = {
 	{ HOSTAPD_MODE_IEEE80211A, 128, 36, 177, 4, BW80, P2P_SUPP },
 	{ HOSTAPD_MODE_IEEE80211A, 129, 36, 177, 4, BW160, P2P_SUPP },
 	{ HOSTAPD_MODE_IEEE80211A, 131, 1, 233, 4, BW20, P2P_SUPP },
-	{ HOSTAPD_MODE_IEEE80211A, 132, 1, 233, 8, BW40, P2P_SUPP },
-	{ HOSTAPD_MODE_IEEE80211A, 133, 1, 233, 16, BW80, P2P_SUPP },
-	{ HOSTAPD_MODE_IEEE80211A, 134, 1, 233, 32, BW160, P2P_SUPP },
+	{ HOSTAPD_MODE_IEEE80211A, 132, 1, 233, 8, BW40, NO_P2P_SUPP },
+	{ HOSTAPD_MODE_IEEE80211A, 133, 1, 233, 16, BW80, NO_P2P_SUPP },
+	{ HOSTAPD_MODE_IEEE80211A, 134, 1, 233, 32, BW160, NO_P2P_SUPP },
 	{ HOSTAPD_MODE_IEEE80211A, 135, 1, 233, 16, BW80P80, NO_P2P_SUPP },
 	{ HOSTAPD_MODE_IEEE80211A, 136, 2, 2, 4, BW20, NO_P2P_SUPP },
 

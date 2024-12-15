@@ -126,6 +126,12 @@ WPA_CIPHER_BIP_CMAC_256)
 #define RSN_KEY_DATA_MULTIBAND_KEYID RSN_SELECTOR(0x00, 0x0f, 0xac, 12)
 #define RSN_KEY_DATA_OCI RSN_SELECTOR(0x00, 0x0f, 0xac, 13)
 #define RSN_KEY_DATA_BIGTK RSN_SELECTOR(0x00, 0x0f, 0xac, 14)
+#ifdef CONFIG_MTK_IEEE80211BE
+#define RSN_KEY_DATA_MLO_GTK RSN_SELECTOR(0x00, 0x0f, 0xac, 16)
+#define RSN_KEY_DATA_MLO_IGTK RSN_SELECTOR(0x00, 0x0f, 0xac, 17)
+#define RSN_KEY_DATA_MLO_BIGTK RSN_SELECTOR(0x00, 0x0f, 0xac, 18)
+#define RSN_KEY_DATA_MLO_LINK RSN_SELECTOR(0x00, 0x0f, 0xac, 19)
+#endif
 
 #define WFA_KEY_DATA_IP_ADDR_REQ RSN_SELECTOR(0x50, 0x6f, 0x9a, 4)
 #define WFA_KEY_DATA_IP_ADDR_ALLOC RSN_SELECTOR(0x50, 0x6f, 0x9a, 5)
@@ -258,6 +264,37 @@ struct wpa_bigtk {
 	size_t bigtk_len;
 };
 
+#ifdef CONFIG_MTK_IEEE80211BE
+
+#define ML_MAX_LINK_NUM 3
+
+struct kde_data {
+	const u8 *data;
+	size_t len;
+};
+
+struct ml_kde {
+	size_t num;
+	struct kde_data kdes[ML_MAX_LINK_NUM];
+};
+
+struct ml_gtk_holder {
+	size_t num;
+	struct wpa_gtk gtks[ML_MAX_LINK_NUM];
+};
+
+struct ml_igtk_holder {
+	size_t num;
+	struct wpa_igtk igtks[ML_MAX_LINK_NUM];
+};
+
+struct ml_bigtk_holder {
+	size_t num;
+	struct wpa_bigtk bigtks[ML_MAX_LINK_NUM];
+};
+
+#endif
+
 /* WPA IE version 1
  * 00-50-f2:1 (OUI:OUI type)
  * 0x01 0x00 (version; little endian)
@@ -360,6 +397,9 @@ struct rsn_ftie_sha384 {
 #define FTIE_SUBELEM_IGTK 4
 #define FTIE_SUBELEM_OCI 5
 #define FTIE_SUBELEM_BIGTK 6
+#define FTIE_SUBELEM_MLO_GTK 7
+#define FTIE_SUBELEM_MLO_IGTK 8
+#define FTIE_SUBELEM_MLO_BIGTK 9
 
 struct rsn_rdie {
 	u8 id;
@@ -517,6 +557,17 @@ struct wpa_ft_ies {
 	int pairwise_cipher;
 	const u8 *rsnxe;
 	size_t rsnxe_len;
+#ifdef CONFIG_MTK_IEEE80211BE
+	const u8 *mlo_gtk[ML_MAX_LINK_NUM];
+	size_t mlo_gtk_len[ML_MAX_LINK_NUM];
+	size_t mlo_gtk_num;
+	const u8 *mlo_igtk[ML_MAX_LINK_NUM];
+	size_t mlo_igtk_len[ML_MAX_LINK_NUM];
+	size_t mlo_igtk_num;
+	const u8 *mlo_bigtk[ML_MAX_LINK_NUM];
+	size_t mlo_bigtk_len[ML_MAX_LINK_NUM];
+	size_t mlo_bigtk_num;
+#endif /* CONFIG_MTK_IEEE80211BE */
 };
 
 /* IEEE P802.11az/D2.6 - 9.4.2.303 PASN Parameters element */
@@ -608,6 +659,12 @@ struct wpa_eapol_ie_parse {
 	u16 aid;
 	const u8 *wmm;
 	size_t wmm_len;
+#ifdef CONFIG_MTK_IEEE80211BE
+	struct ml_kde mlo_gtk;
+	struct ml_kde mlo_igtk;
+	struct ml_kde mlo_bigtk;
+	struct ml_kde mlo_link;
+#endif
 };
 
 int wpa_parse_kde_ies(const u8 *buf, size_t len, struct wpa_eapol_ie_parse *ie);

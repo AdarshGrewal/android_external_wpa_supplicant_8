@@ -979,6 +979,29 @@ static int wpa_ft_parse_ftie(const u8 *ie, size_t ie_len,
 			parse->bigtk = pos;
 			parse->bigtk_len = len;
 			break;
+#ifdef CONFIG_MTK_IEEE80211BE
+		case FTIE_SUBELEM_MLO_GTK:
+			if (parse->mlo_gtk_num < ML_MAX_LINK_NUM) {
+				parse->mlo_gtk[parse->mlo_gtk_num] = pos;
+				parse->mlo_gtk_len[parse->mlo_gtk_num] = len;
+				parse->mlo_gtk_num++;
+			}
+			break;
+		case FTIE_SUBELEM_MLO_IGTK:
+			if (parse->mlo_igtk_num < ML_MAX_LINK_NUM) {
+				parse->mlo_igtk[parse->mlo_igtk_num] = pos;
+				parse->mlo_igtk_len[parse->mlo_igtk_num] = len;
+				parse->mlo_igtk_num++;
+			}
+			break;
+		case FTIE_SUBELEM_MLO_BIGTK:
+			if (parse->mlo_bigtk_num < ML_MAX_LINK_NUM) {
+				parse->mlo_bigtk[parse->mlo_bigtk_num] = pos;
+				parse->mlo_bigtk_len[parse->mlo_bigtk_num] = len;
+				parse->mlo_bigtk_num++;
+			}
+			break;
+#endif /* CONFIG_MTK_IEEE80211BE */
 		default:
 			wpa_printf(MSG_DEBUG, "FT: Unknown subelem id %u", id);
 			break;
@@ -2311,6 +2334,10 @@ const char * wpa_cipher_txt(int cipher)
 		return "CCMP+TKIP";
 	case WPA_CIPHER_GCMP:
 		return "GCMP";
+#if CONFIG_WAPI_SUPPORT
+	case WPA_CIPHER_SMS4:
+		return "SMS4";
+#endif
 	case WPA_CIPHER_GCMP_256:
 		return "GCMP-256";
 	case WPA_CIPHER_CCMP_256:
@@ -2374,6 +2401,12 @@ const char * wpa_key_mgmt_txt(int key_mgmt, int proto)
 		return "SAE";
 	case WPA_KEY_MGMT_FT_SAE:
 		return "FT-SAE";
+#if CONFIG_WAPI_SUPPORT
+	case WPA_KEY_MGMT_WAPI_PSK:
+		return "WAPI-PSK";
+	case WPA_KEY_MGMT_WAPI_CERT:
+		return "WAPI-CERT";
+#endif
 	case WPA_KEY_MGMT_OSEN:
 		return "OSEN";
 	case WPA_KEY_MGMT_IEEE8021X_SUITE_B:
@@ -3135,6 +3168,63 @@ static int wpa_parse_generic(const u8 *pos, struct wpa_eapol_ie_parse *ie)
 		return 0;
 	}
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (pos[1] > RSN_SELECTOR_LEN + 2 &&
+	    RSN_SELECTOR_GET(pos + 2) == RSN_KEY_DATA_MLO_GTK) {
+		struct kde_data *kde;
+
+		if (ie->mlo_gtk.num >= ML_MAX_LINK_NUM)
+			return 1;
+		kde = &ie->mlo_gtk.kdes[ie->mlo_gtk.num++];
+		kde->data = pos + 2 + RSN_SELECTOR_LEN;
+		kde->len = pos[1] - RSN_SELECTOR_LEN;
+		wpa_hexdump_key(MSG_DEBUG, "WPA: MLO GTK in EAPOL-Key",
+				pos, pos[1] + 2);
+		return 0;
+	}
+
+	if (pos[1] > RSN_SELECTOR_LEN + 2 &&
+	    RSN_SELECTOR_GET(pos + 2) == RSN_KEY_DATA_MLO_IGTK) {
+		struct kde_data *kde;
+
+		if (ie->mlo_igtk.num >= ML_MAX_LINK_NUM)
+			return 1;
+		kde = &ie->mlo_igtk.kdes[ie->mlo_igtk.num++];
+		kde->data = pos + 2 + RSN_SELECTOR_LEN;
+		kde->len = pos[1] - RSN_SELECTOR_LEN;
+		wpa_hexdump_key(MSG_DEBUG, "WPA: MLO IGTK in EAPOL-Key",
+				pos, pos[1] + 2);
+		return 0;
+	}
+
+	if (pos[1] > RSN_SELECTOR_LEN + 2 &&
+	    RSN_SELECTOR_GET(pos + 2) == RSN_KEY_DATA_MLO_BIGTK) {
+		struct kde_data *kde;
+
+		if (ie->mlo_bigtk.num >= ML_MAX_LINK_NUM)
+			return 1;
+		kde = &ie->mlo_bigtk.kdes[ie->mlo_bigtk.num++];
+		kde->data = pos + 2 + RSN_SELECTOR_LEN;
+		kde->len = pos[1] - RSN_SELECTOR_LEN;
+		wpa_hexdump_key(MSG_DEBUG, "WPA: MLO BIGTK in EAPOL-Key",
+				pos, pos[1] + 2);
+		return 0;
+	}
+
+	if (pos[1] > RSN_SELECTOR_LEN + 2 &&
+	    RSN_SELECTOR_GET(pos + 2) == RSN_KEY_DATA_MLO_LINK) {
+		struct kde_data *kde;
+
+		if (ie->mlo_link.num >= ML_MAX_LINK_NUM)
+			return 1;
+		kde = &ie->mlo_link.kdes[ie->mlo_link.num++];
+		kde->data = pos + 2 + RSN_SELECTOR_LEN;
+		kde->len = pos[1] - RSN_SELECTOR_LEN;
+		wpa_hexdump_key(MSG_DEBUG, "WPA: MLO Link in EAPOL-Key",
+				pos, pos[1] + 2);
+		return 0;
+	}
+#endif
 	return 2;
 }
 

@@ -419,14 +419,17 @@ int wpa_auth_pmksa_add(struct wpa_state_machine *sm, const u8 *pmk,
 		       int session_timeout, struct eapol_state_machine *eapol);
 int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
 			       const u8 *pmk, size_t len, const u8 *sta_addr,
-			       int session_timeout,
+			       const u8 *aa, int session_timeout,
 			       struct eapol_state_machine *eapol);
 int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
-			   const u8 *pmk, const u8 *pmkid);
+			   const u8 *aa, const u8 *pmk, const u8 *pmkid);
 void wpa_auth_add_sae_pmkid(struct wpa_state_machine *sm, const u8 *pmkid);
 int wpa_auth_pmksa_add2(struct wpa_authenticator *wpa_auth, const u8 *addr,
 			const u8 *pmk, size_t pmk_len, const u8 *pmkid,
 			int session_timeout, int akmp);
+int wpa_auth_pmksa_add3(struct wpa_authenticator *wpa_auth, const u8 *addr,
+			const u8 *aa,	const u8 *pmk, size_t pmk_len,
+			const u8 *pmkid, int session_timeout, int akmp);
 void wpa_auth_pmksa_remove(struct wpa_authenticator *wpa_auth,
 			   const u8 *sta_addr);
 int wpa_auth_pmksa_list(struct wpa_authenticator *wpa_auth, char *buf,
@@ -558,6 +561,7 @@ int wpa_auth_resend_group_m1(struct wpa_state_machine *sm,
 int wpa_auth_rekey_ptk(struct wpa_authenticator *wpa_auth,
 		       struct wpa_state_machine *sm);
 int wpa_auth_rekey_gtk(struct wpa_authenticator *wpa_auth);
+void wpa_rekey_gtk(void *eloop_ctx, void *timeout_ctx);
 int hostapd_wpa_auth_send_eapol(void *ctx, const u8 *addr,
 				const u8 *data, size_t data_len,
 				int encrypt);

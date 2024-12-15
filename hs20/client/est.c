@@ -136,7 +136,7 @@ int est_load_cacerts(struct hs20_osu_client *ctx, const char *url)
 	write_summary(ctx, "Download EST cacerts from %s", buf);
 	ctx->no_osu_cert_validation = 1;
 	http_ocsp_set(ctx->http, 1);
-	res = http_download_file(ctx->http, buf, "Cert/est-cacerts.txt",
+	res = http_download_file(ctx->http, buf, "/data/misc/wifi/hs20/Cert/est-cacerts.txt",
 				 ctx->ca_fname);
 	http_ocsp_set(ctx->http,
 		      (ctx->workarounds & WORKAROUND_OCSP_OPTIONAL) ? 1 : 2);
@@ -151,7 +151,7 @@ int est_load_cacerts(struct hs20_osu_client *ctx, const char *url)
 	}
 	os_free(buf);
 
-	resp = os_readfile("Cert/est-cacerts.txt", &resp_len);
+	resp = os_readfile("/data/misc/wifi/hs20/Cert/est-cacerts.txt", &resp_len);
 	if (resp == NULL) {
 		wpa_printf(MSG_INFO, "Could not read Cert/est-cacerts.txt");
 		write_result(ctx, "Could not read EST cacerts");
@@ -181,7 +181,7 @@ int est_load_cacerts(struct hs20_osu_client *ctx, const char *url)
 		return -1;
 	}
 
-	res = pkcs7_to_cert(ctx, pkcs7, pkcs7_len, "Cert/est-cacerts.pem",
+	res = pkcs7_to_cert(ctx, pkcs7, pkcs7_len, "/data/misc/wifi/hs20/Cert/est-cacerts.pem",
 			    NULL);
 	os_free(pkcs7);
 	if (res < 0) {
@@ -189,7 +189,7 @@ int est_load_cacerts(struct hs20_osu_client *ctx, const char *url)
 		write_result(ctx, "Could not parse CA certs from EST PKCS#7 cacerts response");
 		return -1;
 	}
-	unlink("Cert/est-cacerts.txt");
+	unlink("/data/misc/wifi/hs20/Cert/est-cacerts.txt");
 
 	return 0;
 }
@@ -618,7 +618,7 @@ int est_build_csr(struct hs20_osu_client *ctx, const char *url)
 	write_summary(ctx, "Download EST csrattrs from %s", buf);
 	ctx->no_osu_cert_validation = 1;
 	http_ocsp_set(ctx->http, 1);
-	res = http_download_file(ctx->http, buf, "Cert/est-csrattrs.txt",
+	res = http_download_file(ctx->http, buf, "/data/misc/wifi/hs20/Cert/est-csrattrs.txt",
 				 ctx->ca_fname);
 	http_ocsp_set(ctx->http,
 		      (ctx->workarounds & WORKAROUND_OCSP_OPTIONAL) ? 1 : 2);
@@ -633,7 +633,7 @@ int est_build_csr(struct hs20_osu_client *ctx, const char *url)
 		const unsigned char *pos;
 		size_t attrs_len;
 
-		resp = os_readfile("Cert/est-csrattrs.txt", &resp_len);
+		resp = os_readfile("/data/misc/wifi/hs20/Cert/est-csrattrs.txt", &resp_len);
 		if (resp == NULL) {
 			wpa_printf(MSG_INFO, "Could not read csrattrs");
 			return -1;
@@ -646,7 +646,7 @@ int est_build_csr(struct hs20_osu_client *ctx, const char *url)
 			wpa_printf(MSG_INFO, "Could not base64 decode csrattrs");
 			return -1;
 		}
-		unlink("Cert/est-csrattrs.txt");
+		unlink("/data/misc/wifi/hs20/Cert/est-csrattrs.txt");
 
 		pos = attrs;
 		csrattrs = d2i_CsrAttrs(NULL, &pos, attrs_len);
@@ -663,8 +663,8 @@ int est_build_csr(struct hs20_osu_client *ctx, const char *url)
 		old_cert = old_cert_buf;
 	}
 
-	res = generate_csr(ctx, "Cert/privkey-plain.pem", "Cert/est-req.pem",
-			   "Cert/est-req.b64", old_cert, csrattrs);
+	res = generate_csr(ctx, "/data/misc/wifi/hs20/Cert/privkey-plain.pem", "/data/misc/wifi/hs20/Cert/est-req.pem",
+			   "/data/misc/wifi/hs20/Cert/est-req.b64", old_cert, csrattrs);
 	if (csrattrs)
 		CsrAttrs_free(csrattrs);
 
@@ -683,9 +683,9 @@ int est_simple_enroll(struct hs20_osu_client *ctx, const char *url,
 	const char *client_cert = NULL, *client_key = NULL;
 	int res;
 
-	req = os_readfile("Cert/est-req.b64", &len);
+	req = os_readfile("/data/misc/wifi/hs20/Cert/est-req.b64", &len);
 	if (req == NULL) {
-		wpa_printf(MSG_INFO, "Could not read Cert/req.b64");
+		wpa_printf(MSG_INFO, "Could not read /data/misc/wifi/hs20/Cert/req.b64");
 		return -1;
 	}
 	req2 = os_realloc(req, len + 1);
@@ -705,6 +705,7 @@ int est_simple_enroll(struct hs20_osu_client *ctx, const char *url,
 	}
 
 	if (ctx->client_cert_present) {
+		wpa_printf(MSG_DEBUG, "[est_simple_enroll] ctx->client_cert_present = true");
 		os_snprintf(buf, buflen, "%s/simplereenroll", url);
 		os_snprintf(client_cert_buf, sizeof(client_cert_buf),
 			    "SP/%s/client-cert.pem", ctx->fqdn);
@@ -750,8 +751,8 @@ int est_simple_enroll(struct hs20_osu_client *ctx, const char *url,
 		return -1;
 	}
 
-	res = pkcs7_to_cert(ctx, pkcs7, pkcs7_len, "Cert/est_cert.pem",
-			    "Cert/est_cert.der");
+	res = pkcs7_to_cert(ctx, pkcs7, pkcs7_len, "/data/misc/wifi/hs20/Cert/est_cert.pem",
+			    "/data/misc/wifi/hs20/Cert/est_cert.der");
 	os_free(pkcs7);
 
 	if (res < 0) {

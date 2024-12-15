@@ -16,6 +16,8 @@
 #include "pmksa_cache.h"
 #include "wpa_supplicant_i.h"
 #include "notify.h"
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
 
 #if defined(IEEE8021X_EAPOL) && !defined(CONFIG_NO_WPA)
 
@@ -185,6 +187,9 @@ pmksa_cache_add(struct rsn_pmksa_cache *pmksa, const u8 *pmk, size_t pmk_len,
 
 	if (wpa_key_mgmt_suite_b(akmp) && !kck)
 		return NULL;
+
+	spa = ml_sm_spa(pmksa->sm, spa);
+	aa = ml_sm_aa(pmksa->sm, aa);
 
 	entry = os_zalloc(sizeof(*entry));
 	if (entry == NULL)
@@ -403,6 +408,9 @@ struct rsn_pmksa_cache_entry * pmksa_cache_get(struct rsn_pmksa_cache *pmksa,
 					       int akmp)
 {
 	struct rsn_pmksa_cache_entry *entry = pmksa->pmksa;
+
+	aa = ml_sm_aa(pmksa->sm, aa);
+
 	while (entry) {
 		if ((aa == NULL || os_memcmp(entry->aa, aa, ETH_ALEN) == 0) &&
 		    (pmkid == NULL ||

@@ -327,8 +327,11 @@ NEED_SHA384=y
 NEED_SHA512=y
 endif
 
+ifneq ($(MTK_CUTTLESTONE),yes)
 ifdef CONFIG_WAPI_INTERFACE
+L_CFLAGS += -DCONFIG_WAPI_SUPPORT
 L_CFLAGS += -DCONFIG_WAPI_INTERFACE
+endif
 endif
 
 ifdef CONFIG_FILS
@@ -945,6 +948,9 @@ endif
 ifdef CONFIG_IEEE80211AX
 OBJS += src/ap/ieee802_11_he.c
 endif
+ifdef CONFIG_IEEE80211BE
+OBJS += src/ap/ieee802_11_eht.c
+endif
 ifdef CONFIG_WNM_AP
 L_CFLAGS += -DCONFIG_WNM_AP
 OBJS += src/ap/wnm_ap.c
@@ -966,6 +972,10 @@ OBJS += src/eap_server/eap_server_methods.c
 
 ifdef CONFIG_IEEE80211AC
 L_CFLAGS += -DCONFIG_IEEE80211AC
+endif
+ifdef CONFIG_IEEE80211BE
+CONFIG_IEEE80211AX=y
+L_CFLAGS += -DCONFIG_IEEE80211BE
 endif
 ifdef CONFIG_IEEE80211AX
 L_CFLAGS += -DCONFIG_IEEE80211AX
@@ -1736,7 +1746,35 @@ ifndef LDO
 LDO=$(CC)
 endif
 
-########################
+
+############ MTK CONFIG START ############
+ifneq ($(MTK_CUTTLESTONE),yes)
+# Fix wpa_supplicant issues
+L_CFLAGS += -DCONFIG_MTK_COMMON
+endif
+
+# Support SCC
+ifdef CONFIG_MTK_SCC
+L_CFLAGS += -DCONFIG_MTK_SCC
+endif
+
+# Fix P2P connection issues
+ifdef CONFIG_MTK_P2P_CONN
+L_CFLAGS += -DCONFIG_MTK_P2P_CONN
+endif
+
+# MTK P2P 6G customization - mainly for fixing IOT issues
+ifdef CONFIG_MTK_P2P_6G
+L_CFLAGS += -DCONFIG_MTK_P2P_6G
+endif
+
+# Support MLO
+ifdef CONFIG_MTK_IEEE80211BE
+OBJS += src/ml/ml.c
+L_CFLAGS += -DCONFIG_MTK_IEEE80211BE
+endif
+
+############ MTK CONFIG END ############
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := wpa_cli

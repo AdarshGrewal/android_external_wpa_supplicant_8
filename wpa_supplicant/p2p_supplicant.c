@@ -16,6 +16,7 @@
 #include "common/wpa_ctrl.h"
 #include "wps/wps_i.h"
 #include "p2p/p2p.h"
+#include "p2p/p2p_i.h"
 #include "ap/hostapd.h"
 #include "ap/ap_config.h"
 #include "ap/sta_info.h"
@@ -37,7 +38,9 @@
 #include "wps_supplicant.h"
 #include "p2p_supplicant.h"
 #include "wifi_display.h"
-
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 /*
  * How many times to try to scan to find the GO before giving up on join
@@ -165,6 +168,11 @@ wpas_p2p_consider_moving_gos(struct wpa_supplicant *wpa_s,
 			     struct wpa_used_freq_data *freqs, unsigned int num,
 			     enum wpas_p2p_channel_update_trig trig);
 static void wpas_p2p_reconsider_moving_go(void *eloop_ctx, void *timeout_ctx);
+static struct wpa_supplicant *
+wpas_p2p_init_group_interface(struct wpa_supplicant *wpa_s, int go);
+static void wpas_start_wps_go(struct wpa_supplicant *wpa_s,
+			      struct p2p_go_neg_results *params,
+			      int group_formation);
 
 
 static int wpas_get_6ghz_he_chwidth_capab(struct hostapd_hw_modes *mode)
@@ -1008,6 +1016,18 @@ static int wpas_p2p_group_delete(struct wpa_supplicant *wpa_s,
 		struct wpa_global *global;
 		char *ifname;
 		enum wpa_driver_if_type type;
+#ifdef CONFIG_MTK_IEEE80211BE
+		struct wpa_supplicant *dual_go = NULL;
+		struct wpa_global *dual_global;
+		char *dual_ifname;
+		enum wpa_driver_if_type dual_type;
+
+		if (wpa_s->global->p2p_dual_go && wpa_s != wpa_s->global->p2p_dual_go) {
+			dual_go = wpa_s->global->p2p_dual_go;
+			wpa_s->global->p2p_dual_go = NULL;
+		}
+#endif
+
 		wpa_printf(MSG_DEBUG, "P2P: Remove group interface %s",
 			wpa_s->ifname);
 		global = wpa_s->global;
@@ -1019,6 +1039,21 @@ static int wpas_p2p_group_delete(struct wpa_supplicant *wpa_s,
 		if (wpa_s && ifname)
 			wpa_drv_if_remove(wpa_s, type, ifname);
 		os_free(ifname);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (dual_go) {
+			dual_global = dual_go->global;
+			dual_ifname = os_strdup(dual_go->ifname);
+			dual_type = wpas_p2p_if_type(dual_go->p2p_group_interface);
+			wpa_printf(MSG_DEBUG, "P2P: Remove group interface2 %s",
+				dual_ifname);
+			wpa_supplicant_remove_iface(dual_go->global, dual_go, 0);
+			if (dual_global->ifaces && dual_ifname)
+			       wpa_drv_if_remove(dual_global->ifaces, dual_type, dual_ifname);
+			os_free(dual_ifname);
+		}
+#endif
+
 		return 1;
 	}
 
@@ -2082,16 +2117,27 @@ static void wpas_start_wps_go(struct wpa_supplicant *wpa_s,
 	}
 	ssid->auth_alg = WPA_AUTH_ALG_OPEN;
 	ssid->key_mgmt = WPA_KEY_MGMT_PSK;
+
 	if (is_6ghz_freq(ssid->frequency) &&
 	    is_p2p_6ghz_capable(wpa_s->global->p2p)) {
 		ssid->auth_alg |= WPA_AUTH_ALG_SAE;
+#ifdef CONFIG_MTK_P2P_6G
+		/*
+		 * Allow P2P 6E connection with IOT devices using WPA2 or WPA3.
+		 */
+		ssid->key_mgmt |= WPA_KEY_MGMT_SAE;
+		ssid->ieee80211w = MGMT_FRAME_PROTECTION_OPTIONAL;
+		ssid->sae_pwe = 2;
+#else
 		ssid->key_mgmt = WPA_KEY_MGMT_SAE;
 		ssid->ieee80211w = MGMT_FRAME_PROTECTION_REQUIRED;
 		ssid->sae_pwe = 1;
+#endif
 		wpa_dbg(wpa_s, MSG_DEBUG, "P2P: Use SAE auth_alg and key_mgmt");
 	} else {
 		p2p_set_6ghz_dev_capab(wpa_s->global->p2p, false);
 	}
+
 	ssid->proto = WPA_PROTO_RSN;
 	ssid->pairwise_cipher = WPA_CIPHER_CCMP;
 	ssid->group_cipher = WPA_CIPHER_CCMP;
@@ -2493,6 +2539,28 @@ static void wpas_go_neg_completed(void *ctx, struct p2p_go_neg_results *res)
 	}
 	if (res->role_go) {
 		wpas_start_wps_go(group_wpa_s, res, 1);
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (wpa_s->global->p2p->ml_capa) {
+			struct wpa_supplicant *dual_go;
+
+			dual_go = wpas_p2p_init_group_interface(wpa_s, 1);
+			if (dual_go) {
+				unsigned int freq = ml_p2p_get_2nd_freq(
+					wpa_s->global->p2p,
+					res->freq);
+
+				wpa_s->global->p2p_dual_go = dual_go;
+				if (freq)
+					res->freq = freq;
+				else
+					res->freq = res->freq <= 2484 ? 5180 : 2462;
+				wpas_start_wps_go(dual_go, res, 0);
+			}
+			/* restore p2p_group_formation for primary GO */
+			wpa_s->global->p2p_group_formation = group_wpa_s;
+		}
+#endif
+
 	} else {
 		os_get_reltime(&group_wpa_s->scan_min_time);
 		wpas_start_wps_enrollee(group_wpa_s, res);
@@ -3841,6 +3909,7 @@ static enum chan_allowed wpas_p2p_verify_channel(struct wpa_supplicant *wpa_s,
 	} else if (bw == BW40PLUS) {
 		if (!(flag & HOSTAPD_CHAN_HT40PLUS))
 			return NOT_ALLOWED;
+
 		res2 = has_channel(wpa_s->global, mode, op_class, channel + 4,
 				   NULL);
 	} else if (is_6ghz_op_class(op_class) && bw == BW40) {
@@ -3852,7 +3921,19 @@ static enum chan_allowed wpas_p2p_verify_channel(struct wpa_supplicant *wpa_s,
 		else
 			res2 = has_channel(wpa_s->global, mode, op_class,
 					   channel + 4, NULL);
+
+#ifdef CONFIG_MTK_P2P_CONN
+	/*
+	 * [ALPS03415656] Device C cannot join an existing P2P group.
+	 * The BW80P80 type of class 130 defined in global_op_class was not handled
+	 * properly by AOSP Supplicant. Many channels of class 130 was added to P2P's
+	 * supported channels unexpectedly and may cause IOT issues. This patch will
+	 * remove class 130 channels if the device does not support 80211ac.
+	 */
+	} else if (bw == BW80 || bw == BW80P80) {
+#else
 	} else if (bw == BW80) {
+#endif
 		res2 = wpas_p2p_verify_80mhz(wpa_s, mode, op_class, channel,
 					     bw);
 	} else if (bw == BW160) {
@@ -3995,6 +4076,7 @@ int wpas_p2p_get_sec_channel_offset_40mhz(struct wpa_supplicant *wpa_s,
 			     o->bw != BW40) ||
 			    ch != chan)
 				continue;
+
 			ret = wpas_p2p_verify_channel(wpa_s, mode, o->op_class,
 						      ch, o->bw);
 			if (ret == ALLOWED) {
@@ -4059,7 +4141,6 @@ int wpas_p2p_get_vht160_center(struct wpa_supplicant *wpa_s,
 	return wpas_p2p_get_center_160mhz(wpa_s, mode, channel,
 					  chans, num_chans);
 }
-
 
 static int wpas_get_noa(void *ctx, const u8 *interface_addr, u8 *buf,
 			size_t buf_len)
@@ -4736,8 +4817,25 @@ static int wpas_p2p_get_pref_freq_list(void *ctx, int go,
 {
 	struct wpa_supplicant *wpa_s = ctx;
 
+#ifdef CONFIG_MTK_P2P_6G
+/* [ALPS06301198] In case peer doesn't have preference list, supplicant may use
+ * driver's preference channel as operating channel. We need to remove 6ghz
+ * channels from preference list if peer doesn't have 6g capability. Otherwise,
+ * we may start GO at 6ghz channel and peer will not be able to connect with us.
+ */
+	int res;
+
+	res = wpa_drv_get_pref_freq_list(wpa_s, go ? WPA_IF_P2P_GO :
+					  WPA_IF_P2P_CLIENT, len, freq_list);
+
+	if (!is_p2p_allow_6ghz(wpa_s->global->p2p))
+		*len = p2p_remove_6ghz_channels(freq_list, *len);
+
+	return res;
+#else
 	return wpa_drv_get_pref_freq_list(wpa_s, go ? WPA_IF_P2P_GO :
 					  WPA_IF_P2P_CLIENT, len, freq_list);
+#endif
 }
 
 int wpas_p2p_mac_setup(struct wpa_supplicant *wpa_s)
@@ -4857,7 +4955,17 @@ int wpas_p2p_init(struct wpa_global *global, struct wpa_supplicant *wpa_s)
 	p2p.prov_disc_resp_cb = wpas_prov_disc_resp_cb;
 	p2p.p2ps_group_capability = p2ps_group_capability;
 	p2p.get_pref_freq_list = wpas_p2p_get_pref_freq_list;
+#ifdef CONFIG_MTK_P2P_6G
+/* [ALPS06139824] MTK supplicant are common codes for 6E devices that have 6G
+ * HW and for legacy devices that do not have 6G HW. For backward compatible
+ * with legacy devices, we should allow 6ghz only if HW supports 6G band.
+ */
+	p2p.p2p_6ghz_disable = wpa_s->conf->p2p_6ghz_disable ||
+	    !get_mode(wpa_s->hw.modes, wpa_s->hw.num_modes,
+	          HOSTAPD_MODE_IEEE80211A, true);
+#else
 	p2p.p2p_6ghz_disable = wpa_s->conf->p2p_6ghz_disable;
+#endif
 
 	os_memcpy(wpa_s->global->p2p_dev_addr, wpa_s->own_addr, ETH_ALEN);
 	os_memcpy(p2p.dev_addr, wpa_s->global->p2p_dev_addr, ETH_ALEN);
@@ -5817,6 +5925,12 @@ static int wpas_p2p_setup_freqs(struct wpa_supplicant *wpa_s, int freq,
 			res = wpa_drv_get_pref_freq_list(wpa_s, iface_type,
 						 &max_pref_freq,
 						 pref_freq_list);
+
+			if (!is_p2p_allow_6ghz(wpa_s->global->p2p))
+				max_pref_freq = p2p_remove_6ghz_channels(
+							pref_freq_list,
+							max_pref_freq);
+
 			if (!res && max_pref_freq > 0) {
 				*num_pref_freq = max_pref_freq;
 				i = 0;
@@ -5879,26 +5993,46 @@ exit_free:
 
 
 static bool is_p2p_6ghz_supported(struct wpa_supplicant *wpa_s,
-				  const u8 *peer_addr)
+				  const u8 *peer_addr, int freq)
 {
 	if (wpa_s->conf->p2p_6ghz_disable ||
 	    !get_mode(wpa_s->hw.modes, wpa_s->hw.num_modes,
 		      HOSTAPD_MODE_IEEE80211A, true))
 		return false;
 
+#ifdef CONFIG_MTK_P2P_6G
+	/* Do not allow to start auto GO at 6ghz unless 6ghz freq is specified.
+	 * This is to prevent starting autonomous GO at 6ghz unexpectedly.
+	 */
+	if (!peer_addr && !is_6ghz_freq(freq))
+		return false;
+
+	/* For backward compatible with legacy devices, we should allow
+	 * 6ghz conneciton only if peer does have 6ghz capability.
+	 */
+	if (peer_addr &&
+	    !p2p_is_peer_6ghz_capab(wpa_s->global->p2p, peer_addr)) {
+		wpa_printf(MSG_DEBUG,
+			   "P2P: peer does not have 6ghz capability");
+		return false;
+	}
+
+	return true;
+#else
 	if (!p2p_wfd_enabled(wpa_s->global->p2p))
 		return false;
 	if (peer_addr && !p2p_peer_wfd_enabled(wpa_s->global->p2p, peer_addr))
 		return false;
 
 	return true;
+#endif
 }
 
 
 static int wpas_p2p_check_6ghz(struct wpa_supplicant *wpa_s,
 			       const u8 *peer_addr, bool allow_6ghz, int freq)
 {
-	if (allow_6ghz && is_p2p_6ghz_supported(wpa_s, peer_addr)) {
+	if (allow_6ghz && is_p2p_6ghz_supported(wpa_s, peer_addr, freq)) {
 		wpa_printf(MSG_DEBUG,
 			   "P2P: Allow connection on 6 GHz channels");
 		p2p_set_6ghz_dev_capab(wpa_s->global->p2p, true);
@@ -5907,6 +6041,12 @@ static int wpas_p2p_check_6ghz(struct wpa_supplicant *wpa_s,
 			return -2;
 		p2p_set_6ghz_dev_capab(wpa_s->global->p2p, false);
 	}
+
+#ifdef CONFIG_MTK_P2P_6G
+	/* Update p2p channels to include/exclude 6Ghz channels */
+	wpas_p2p_update_channel_list(wpa_s,
+				     WPAS_P2P_CHANNEL_UPDATE_6GHZ_BAND_CAPABLE);
+#endif
 
 	return 0;
 }
@@ -5980,6 +6120,14 @@ int wpas_p2p_connect(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
 
 	if (go_intent < 0)
 		go_intent = wpa_s->conf->p2p_go_intent;
+
+#ifdef CONFIG_MTK_P2P_CONN
+	/* Force overwrite go intent value if p2p_go_intent is defined
+	 * in config file.
+	 */
+	if (wpa_s->conf->p2p_go_intent != DEFAULT_P2P_GO_INTENT)
+		go_intent = wpa_s->conf->p2p_go_intent;
+#endif
 
 	if (!auth)
 		wpa_s->global->p2p_long_listen = 0;
@@ -7004,6 +7152,9 @@ int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 {
 	struct p2p_go_neg_results params;
 	int go = 0, freq;
+#ifdef CONFIG_MTK_IEEE80211BE
+	struct wpa_supplicant *group_wpa_s = wpa_s;
+#endif
 
 	if (ssid->disabled != 2 || ssid->ssid == NULL)
 		return -1;
@@ -7103,6 +7254,25 @@ int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 
 	wpa_s->p2p_first_connection_timeout = connection_timeout;
 	wpas_start_wps_go(wpa_s, &params, 0);
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (group_wpa_s->global->p2p->ml_capa) {
+		struct wpa_supplicant *dual_go =
+			wpas_p2p_init_group_interface(group_wpa_s, 1);
+
+		if (dual_go) {
+			unsigned int freq = ml_p2p_get_2nd_freq(
+				group_wpa_s->global->p2p,
+				params.freq);
+
+			wpa_s->global->p2p_dual_go = dual_go;
+			if (freq)
+				params.freq = freq;
+			else
+				params.freq = params.freq <= 2484 ? 5180 : 2462;
+			wpas_start_wps_go(dual_go, &params, 0);
+		}
+	}
+#endif
 
 	return 0;
 }
@@ -7372,6 +7542,21 @@ int wpas_p2p_scan_result_text(const u8 *ies, size_t ies_len, char *buf,
 
 static void wpas_p2p_clear_pending_action_tx(struct wpa_supplicant *wpa_s)
 {
+#ifdef CONFIG_MTK_P2P_CONN
+/*
+  * [ALPS05355124] P2P: cancel pending p2p-send-action
+  * In case p2p-send-action radio work was queued for some reason
+  * (e.g. waiting for scan done), we will have to free previous
+  * p2p-send-action. Otherwise, when previous radio work was done,
+  * p2p state may be changed unexpectedly and will fail following
+  * p2p connections.
+  */
+	if (radio_work_pending(wpa_s, "p2p-send-action")) {
+		wpa_printf(MSG_DEBUG, "P2P: Cancel p2p-send-action work since it is out-of-date");
+		radio_remove_works(wpa_s, "p2p-send-action", 0);
+	}
+#endif
+
 	if (!offchannel_pending_action_tx(wpa_s))
 		return;
 
@@ -7638,8 +7823,13 @@ int wpas_p2p_invite(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
 	int no_pref_freq_given = pref_freq == 0;
 	unsigned int pref_freq_list[P2P_MAX_PREF_CHANNELS], size;
 
+#ifdef CONFIG_MTK_P2P_6G
+	if (wpas_p2p_check_6ghz(wpa_s, peer_addr, allow_6ghz, freq))
+		return -1;
+#else
 	if (wpas_p2p_check_6ghz(wpa_s, NULL, allow_6ghz, freq))
 		return -1;
+#endif
 
 	wpa_s->global->p2p_invite_group = NULL;
 	if (peer_addr)
@@ -8357,7 +8547,11 @@ void wpas_p2p_update_channel_list(struct wpa_supplicant *wpa_s,
 	os_memset(&chan, 0, sizeof(chan));
 	os_memset(&cli_chan, 0, sizeof(cli_chan));
 	if (wpas_p2p_setup_channels(wpa_s, &chan, &cli_chan,
+#ifdef CONFIG_MTK_P2P_6G
+				    !is_p2p_allow_6ghz(wpa_s->global->p2p))) {
+#else
 				    is_p2p_6ghz_disabled(wpa_s->global->p2p))) {
+#endif
 		wpa_printf(MSG_ERROR, "P2P: Failed to update supported "
 			   "channel list");
 		return;
@@ -8562,6 +8756,18 @@ void wpas_p2p_network_removed(struct wpa_supplicant *wpa_s,
 			      struct wpa_ssid *ssid)
 {
 	if (wpa_s->p2p_in_provisioning && ssid->p2p_group &&
+#ifdef CONFIG_MTK_P2P_CONN
+/* [ALPS04230256] p2p: Fix WFD connect issue
+ * AOSP frameworks support maximum 33 connections. In current supplicant's
+ * implementation, if we try to re-establish p2p connection with a IOT device
+ * that does not support p2p inviation, the invitation connection will fail
+ * and create a new invalid network ID in frameworks. Repeat this scenario
+ * for 33 times, we will not be able to connect to the IOT device any more
+ * (unless we turn wifi off and on again). To resolve this issue, we will have
+ * to check the SSID when trying to remove a network.
+ */
+	    (ssid == wpa_s->current_ssid) &&
+#endif
 	    eloop_cancel_timeout(wpas_p2p_group_formation_timeout,
 				 wpa_s->p2pdev, NULL) > 0) {
 		/**
@@ -9922,6 +10128,14 @@ static void wpas_p2p_consider_moving_one_go(struct wpa_supplicant *wpa_s,
 	unsigned int timeout;
 	int freq;
 	int dfs_offload;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (wpa_s->global->p2p_dual_go == wpa_s ||
+		wpa_s->global->p2p->ml_capa) {
+		wpa_printf(MSG_DEBUG, "ML: Don't consider 2nd GO group");
+		return;
+	}
+#endif
 
 	wpas_p2p_go_update_common_freqs(wpa_s);
 

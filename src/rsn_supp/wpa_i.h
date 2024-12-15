@@ -14,6 +14,10 @@
 struct wpa_tdls_peer;
 struct wpa_eapol_key;
 
+#ifdef CONFIG_MTK_IEEE80211BE
+struct wpa_ml_ie_parse;
+#endif
+
 struct pasn_ft_r1kh {
 	u8 bssid[ETH_ALEN];
 	u8 r1kh_id[FT_R1KH_ID_LEN];
@@ -118,6 +122,21 @@ struct wpa_sm {
 	size_t assoc_rsnxe_len;
 	u8 *ap_wpa_ie, *ap_rsn_ie, *ap_rsnxe;
 	size_t ap_wpa_ie_len, ap_rsn_ie_len, ap_rsnxe_len;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 dot11MultiLinkActivated;
+	u8 prof_num;
+
+	struct wpa_ml_ie_parse *sta_ml_ie; /* Own ML IE from (Re)AssocReq */
+	struct wpa_ml_ie_parse *ap_ml_ie; /* AP ML IE from (Re)AssocResp */
+
+	struct ml_gtk_holder ml_gtk;
+	struct ml_gtk_holder ml_gtk_wnm_sleep;
+	struct ml_igtk_holder ml_igtk;
+	struct ml_igtk_holder ml_igtk_wnm_sleep;
+	struct ml_bigtk_holder ml_bigtk;
+	struct ml_bigtk_holder ml_bigtk_wnm_sleep;
+#endif
 
 #ifdef CONFIG_TDLS
 	struct wpa_tdls_peer *tdls;

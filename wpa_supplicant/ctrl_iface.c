@@ -59,6 +59,10 @@
 #include "dpp_supplicant.h"
 #include "sme.h"
 
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 #ifdef __NetBSD__
 #include <net/if_ether.h>
 #elif !defined(__CYGWIN__) && !defined(CONFIG_NATIVE_WINDOWS)
@@ -2306,11 +2310,12 @@ static int wpa_supplicant_ctrl_iface_status(struct wpa_supplicant *wpa_s,
 
 		if (wpa_s->connection_set &&
 		    (wpa_s->connection_ht || wpa_s->connection_vht ||
-		     wpa_s->connection_he)) {
+		     wpa_s->connection_he || wpa_s->connection_eht)) {
 			ret = os_snprintf(pos, end - pos,
 					  "wifi_generation=%u\n",
-					  wpa_s->connection_he ? 6 :
-					  (wpa_s->connection_vht ? 5 : 4));
+					  wpa_s->connection_eht ? 7 :
+					  (wpa_s->connection_he ? 6 :
+					   (wpa_s->connection_vht ? 5 : 4)));
 			if (os_snprintf_error(end - pos, ret))
 				return pos - buf;
 			pos += ret;
@@ -3140,6 +3145,14 @@ static int wpa_supplicant_ctrl_iface_scan_result(
 			return -1;
 		pos += ret;
 	}
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_get_ie(wpa_bss_ie_ptr(bss), bss->ie_len, ML_CTRL_TYPE_BASIC)) {
+		ret = os_snprintf(pos, end - pos, "[MLO]");
+		if (os_snprintf_error(end - pos, ret))
+			return -1;
+		pos += ret;
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	ret = os_snprintf(pos, end - pos, "\t%s",
 			  wpa_ssid_txt(bss->ssid, bss->ssid_len));

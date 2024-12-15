@@ -46,7 +46,11 @@ using aidl::android::hardware::wifi::supplicant::GsmRand;
  */
 constexpr bool isP2pIface(const struct wpa_supplicant *wpa_s)
 {
-	return wpa_s->global->p2p_init_wpa_s == wpa_s;
+	return (wpa_s->global->p2p_init_wpa_s == wpa_s)
+#ifdef CONFIG_MTK_P2P_CONN
+		|| std::regex_match(wpa_s->ifname, std::regex("p2p-p2p\\d-.*"))
+#endif
+		;
 }
 
 /**
@@ -425,6 +429,14 @@ int AidlManager::registerInterface(struct wpa_supplicant *wpa_s)
 {
 	if (!wpa_s)
 		return 1;
+
+#ifdef CONFIG_MTK_P2P_CONN
+	wpa_printf(
+	    MSG_INFO,
+	    "registerInterface control for: %s, isP2pIface: %d",
+	    wpa_s->ifname,
+	    isP2pIface(wpa_s));
+#endif
 
 	if (isP2pIface(wpa_s)) {
 		if (addAidlObjectToMap<P2pIface>(

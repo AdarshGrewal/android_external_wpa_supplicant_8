@@ -20,7 +20,9 @@
 #include "wps/wps_i.h"
 #include "p2p_i.h"
 #include "p2p.h"
-
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 static void p2p_state_timeout(void *eloop_ctx, void *timeout_ctx);
 static void p2p_device_free(struct p2p_data *p2p, struct p2p_device *dev);
@@ -2503,6 +2505,11 @@ p2p_reply_probe(struct p2p_data *p2p, const u8 *addr, const u8 *dst,
 
 	wpabuf_free(ies);
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_is_probe_req(elems.ml, elems.ml_len))
+		ml_build_ml_probe_resp(buf, elems.ml, elems.ml_len);
+#endif
+
 	p2p->cfg->send_probe_resp(p2p->cfg->cb_ctx, buf, rx_freq);
 
 	wpabuf_free(buf);
@@ -2994,6 +3001,10 @@ struct p2p_data * p2p_init(const struct p2p_config *cfg)
 	if (cfg->concurrent_operations)
 		p2p->dev_capab |= P2P_DEV_CAPAB_CONCURRENT_OPER;
 	p2p->dev_capab |= P2P_DEV_CAPAB_CLIENT_DISCOVERABILITY;
+#ifdef CONFIG_MTK_P2P_6G
+	if (!cfg->p2p_6ghz_disable)
+		p2p->dev_capab |= P2P_DEV_CAPAB_6GHZ_BAND_CAPABLE;
+#endif
 
 	dl_list_init(&p2p->devices);
 
@@ -5613,10 +5624,15 @@ void p2p_set_6ghz_dev_capab(struct p2p_data *p2p, bool allow_6ghz)
 	p2p->allow_6ghz = allow_6ghz;
 	p2p_dbg(p2p, "Set 6 GHz capability to %d", allow_6ghz);
 
+#ifndef CONFIG_MTK_P2P_6G
+	/* Do not reset 6GHz capability. Otherwise, we may not be able
+	 * to connect p2p in 6GHz for new p2p connections.
+	 */
 	if (allow_6ghz)
 		p2p->dev_capab |= P2P_DEV_CAPAB_6GHZ_BAND_CAPABLE;
 	else
 		p2p->dev_capab &= ~P2P_DEV_CAPAB_6GHZ_BAND_CAPABLE;
+#endif
 }
 
 

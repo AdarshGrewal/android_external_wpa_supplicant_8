@@ -17,6 +17,18 @@
 #include "ap_config.h"
 #include "pmksa_cache_auth.h"
 
+#ifdef CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+#include "wpa_auth.h"
+#include "wpa_auth_i.h"
+#include "hostapd.h"
+
+struct wpa_pmkid_entry {
+	u8 bssid[ETH_ALEN];
+	u8 sta[ETH_ALEN];
+	u8 pmkid[PMKID_LEN];
+	u8 AddRemove;	/*1- ADD, 0- Remove*/
+};
+#endif /* CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT */
 
 static const int pmksa_cache_max_entries = 1024;
 static const int dot11RSNAConfigPMKLifetime = 43200;
@@ -53,6 +65,27 @@ void pmksa_cache_free_entry(struct rsn_pmksa_cache *pmksa,
 {
 	struct rsn_pmksa_cache_entry *pos, *prev;
 	unsigned int hash;
+#ifdef CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+	struct wpa_authenticator *wpa_auth;
+	struct hostapd_data *hapd;
+	struct wpa_pmkid_entry pmkid_entry;
+
+	wpa_auth = (struct wpa_authenticator *)pmksa->ctx;
+	hapd = (struct hostapd_data *)wpa_auth->cb_ctx;
+
+	wpa_printf(MSG_INFO, "Remove PMKID in driver ");
+
+	os_memset(&pmkid_entry, 0, sizeof(pmkid_entry));
+	pmkid_entry.AddRemove = 0;	/* Remove entry */
+	os_memcpy(pmkid_entry.sta, entry->spa, ETH_ALEN);
+	os_memcpy(pmkid_entry.bssid, wpa_auth->addr, ETH_ALEN);
+	os_memcpy(pmkid_entry.pmkid, entry->pmkid, PMKID_LEN);
+	hapd->driver->driver_cmd(
+		hapd->drv_priv,
+		"UPDATE_STA_PMKID",
+		(char*)&pmkid_entry,
+		sizeof(pmkid_entry));
+#endif /*CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT*/
 
 	pmksa->pmksa_count--;
 	pmksa->free_cb(entry, pmksa->ctx);
@@ -283,6 +316,11 @@ pmksa_cache_auth_add(struct rsn_pmksa_cache *pmksa,
 		     struct eapol_state_machine *eapol, int akmp)
 {
 	struct rsn_pmksa_cache_entry *entry;
+#ifdef CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+	struct wpa_authenticator *wpa_auth;
+	struct hostapd_data *hapd;
+	struct wpa_pmkid_entry pmkid_entry;
+#endif /* CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT */
 
 	entry = pmksa_cache_auth_create_entry(pmk, pmk_len, pmkid, kck, kck_len,
 					      aa, spa, session_timeout, eapol,
@@ -290,6 +328,24 @@ pmksa_cache_auth_add(struct rsn_pmksa_cache *pmksa,
 
 	if (pmksa_cache_auth_add_entry(pmksa, entry) < 0)
 		return NULL;
+
+#ifdef CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+	wpa_auth = (struct wpa_authenticator *)(pmksa->ctx);
+	hapd = (struct hostapd_data *)(wpa_auth->cb_ctx);
+
+	wpa_printf(MSG_INFO, "Add PMKID in driver ");
+
+	os_memset(&pmkid_entry, 0, sizeof(pmkid_entry));
+	pmkid_entry.AddRemove = 1;	/* Add entry*/
+	os_memcpy(pmkid_entry.sta, spa, ETH_ALEN);
+	os_memcpy(pmkid_entry.bssid, aa, ETH_ALEN);
+	os_memcpy(pmkid_entry.pmkid, pmkid, PMKID_LEN);
+	hapd->driver->driver_cmd(
+		hapd->drv_priv,
+		"UPDATE_STA_PMKID",
+		(char*)&pmkid_entry,
+		sizeof(pmkid_entry));
+#endif /* CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT */
 
 	return entry;
 }

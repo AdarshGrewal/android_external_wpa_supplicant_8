@@ -23,6 +23,11 @@
 #include "wpa_auth.h"
 #include "preauth_auth.h"
 
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#include "wpa_auth_i.h"
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 #ifndef ETH_P_PREAUTH
 #define ETH_P_PREAUTH 0x88C7 /* IEEE 802.11i pre-authentication */
 #endif /* ETH_P_PREAUTH */
@@ -206,7 +211,8 @@ void rsn_preauth_finished(struct hostapd_data *hapd, struct sta_info *sta,
 		len = PMK_LEN;
 	if (success && key) {
 		if (wpa_auth_pmksa_add_preauth(hapd->wpa_auth, key, len,
-					       sta->addr,
+					       ml_auth_spa(sta->wpa_sm, sta->addr),
+					       ml_auth_aa(sta->wpa_sm, hapd->wpa_auth->addr),
 					       dot11RSNAConfigPMKLifetime,
 					       sta->eapol_sm) == 0) {
 			hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_WPA,

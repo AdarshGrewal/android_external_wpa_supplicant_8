@@ -25,7 +25,7 @@
 #include "crypto/sha256.h"
 #include "osu_client.h"
 
-const char *spp_xsd_fname = "spp.xsd";
+const char *spp_xsd_fname = "/data/misc/wifi/hs20/spp.xsd";
 
 
 void write_result(struct hs20_osu_client *ctx, const char *fmt, ...)
@@ -237,7 +237,7 @@ static int process_est_cert(struct hs20_osu_client *ctx, xml_node_t *cert,
 	}
 	xml_node_get_text_free(ctx->xml, fingerprint);
 
-	der = os_readfile("Cert/est_cert.der", &der_len);
+	der = os_readfile("/data/misc/wifi/hs20/Cert/est_cert.der", &der_len);
 	if (der == NULL) {
 		wpa_printf(MSG_INFO, "Could not find client certificate from EST");
 		write_result(ctx, "Could not find client certificate from EST");
@@ -257,18 +257,18 @@ static int process_est_cert(struct hs20_osu_client *ctx, xml_node_t *cert,
 	}
 
 	wpa_printf(MSG_INFO, "Client certificate from EST matches PPS MO");
-	unlink("Cert/est_cert.der");
+	unlink("/data/misc/wifi/hs20/Cert/est_cert.der");
 
-	os_snprintf(buf, sizeof(buf), "SP/%s/client-ca.pem", fqdn);
-	if (rename("Cert/est-cacerts.pem", buf) < 0) {
+	os_snprintf(buf, sizeof(buf), "/data/misc/wifi/hs20/SP/%s/client-ca.pem", fqdn);
+	if (rename("/data/misc/wifi/hs20/Cert/est-cacerts.pem", buf) < 0) {
 		wpa_printf(MSG_INFO, "Could not move est-cacerts.pem to client-ca.pem: %s",
 			   strerror(errno));
 		return -1;
 	}
 	pem = os_readfile(buf, &pem_len);
 
-	os_snprintf(buf, sizeof(buf), "SP/%s/client-cert.pem", fqdn);
-	if (rename("Cert/est_cert.pem", buf) < 0) {
+	os_snprintf(buf, sizeof(buf), "/data/misc/wifi/hs20/SP/%s/client-cert.pem", fqdn);
+	if (rename("/data/misc/wifi/hs20/Cert/est_cert.pem", buf) < 0) {
 		wpa_printf(MSG_INFO, "Could not move est_cert.pem to client-cert.pem: %s",
 			   strerror(errno));
 		os_free(pem);
@@ -284,22 +284,22 @@ static int process_est_cert(struct hs20_osu_client *ctx, xml_node_t *cert,
 		os_free(pem);
 	}
 
-	os_snprintf(buf, sizeof(buf), "SP/%s/client-key.pem", fqdn);
-	if (rename("Cert/privkey-plain.pem", buf) < 0) {
+	os_snprintf(buf, sizeof(buf), "/data/misc/wifi/hs20/SP/%s/client-key.pem", fqdn);
+	if (rename("/data/misc/wifi/hs20/Cert/privkey-plain.pem", buf) < 0) {
 		wpa_printf(MSG_INFO, "Could not move privkey-plain.pem to client-key.pem: %s",
 			   strerror(errno));
 		return -1;
 	}
 
-	unlink("Cert/est-req.b64");
-	unlink("Cert/est-req.pem");
+	unlink("/data/misc/wifi/hs20/Cert/est-req.b64");
+	unlink("/data/misc/wifi/hs20/Cert/est-req.pem");
 	rmdir("Cert");
 
 	return 0;
 }
 
 
-#define TMP_CERT_DL_FILE "tmp-cert-download"
+#define TMP_CERT_DL_FILE "/data/misc/wifi/hs20/tmp-cert-download"
 
 static int download_cert(struct hs20_osu_client *ctx, xml_node_t *params,
 			 const char *fname)
@@ -600,8 +600,8 @@ int hs20_add_pps_mo(struct hs20_osu_client *ctx, const char *uri,
 		return -1;
 	}
 
-	mkdir("SP", S_IRWXU);
-	snprintf(fname, fname_len, "SP/%s", fqdn);
+	mkdir("/data/misc/wifi/hs20/SP", S_IRWXU);
+	snprintf(fname, fname_len, "/data/misc/wifi/hs20/SP/%s", fqdn);
 	if (mkdir(fname, S_IRWXU) < 0) {
 		if (errno != EEXIST) {
 			int err = errno;
@@ -615,7 +615,7 @@ int hs20_add_pps_mo(struct hs20_osu_client *ctx, const char *uri,
 	android_update_permission("SP", S_IRWXU | S_IRWXG);
 	android_update_permission(fname, S_IRWXU | S_IRWXG);
 
-	snprintf(fname, fname_len, "SP/%s/pps.xml", fqdn);
+	snprintf(fname, fname_len, "/data/misc/wifi/hs20/SP/%s/pps.xml", fqdn);
 
 	if (os_file_exists(fname)) {
 		wpa_printf(MSG_INFO, "PPS file '%s' exists - reject addMO",
@@ -1599,7 +1599,9 @@ static void set_pps_cred_digital_cert(struct hs20_osu_client *ctx, int id,
 	if (set_cred_quoted(ctx->ifname, id, "username", "cert") < 0) {
 		wpa_printf(MSG_INFO, "Failed to set username");
 	}
-
+	wpa_printf(MSG_INFO, "[MTK][set_pps_cred_digital_cert] dir:%s", dir);
+	memset(dir, 0, sizeof(dir));
+	snprintf(dir, sizeof(dir), "/data/misc/wifi/hs20");
 	res = os_snprintf(buf, sizeof(buf), "%s/SP/%s/client-cert.pem", dir,
 			  fqdn);
 	if (os_snprintf_error(sizeof(buf), res))
@@ -1642,6 +1644,9 @@ static void set_pps_cred_realm(struct hs20_osu_client *ctx, int id,
 
 	if (getcwd(dir, sizeof(dir)) == NULL)
 		return;
+	wpa_printf(MSG_INFO, "[MTK][set_pps_cred_realm] dir:%s", dir);
+	memset(dir, 0, sizeof(dir));
+	snprintf(dir, sizeof(dir), "/data/misc/wifi/hs20");
 	res = os_snprintf(buf, sizeof(buf), "%s/SP/%s/aaa-ca.pem", dir, fqdn);
 	if (os_snprintf_error(sizeof(buf), res))
 		return;
@@ -2191,8 +2196,10 @@ static int osu_connect(struct hs20_osu_client *ctx, const char *bssid,
 		osu_nai = osu_nai2;
 	if (osu_nai && os_strlen(osu_nai) > 0) {
 		char dir[255], fname[300];
-		if (getcwd(dir, sizeof(dir)) == NULL)
-			return -1;
+		//if (getcwd(dir, sizeof(dir)) == NULL)
+		//	return -1;
+		memset(dir, 0, sizeof(dir));
+		snprintf(dir, sizeof(dir), "/data/misc/wifi/hs20/Certs");
 		os_snprintf(fname, sizeof(fname), "%s/osu-ca.pem", dir);
 
 		if (ssid2 && set_network_quoted(ifname, id, "ssid", ssid2) < 0)
@@ -2504,7 +2511,7 @@ static int cmd_signup(struct hs20_osu_client *ctx, int no_prod_assoc,
 	if (getcwd(dir, sizeof(dir)) == NULL)
 		return -1;
 
-	snprintf(fname, sizeof(fname), "%s/osu-info", dir);
+	snprintf(fname, sizeof(fname), "/data/misc/wifi/hs20/osu-info");
 	if (mkdir(fname, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0 &&
 	    errno != EEXIST) {
 		wpa_printf(MSG_INFO, "mkdir(%s) failed: %s",
@@ -2746,11 +2753,11 @@ static int cmd_pol_upd(struct hs20_osu_client *ctx, const char *address,
 		wpa_printf(MSG_INFO, "Home SP FQDN for current credential: %s",
 			   buf);
 		os_snprintf(pps_fname_buf, sizeof(pps_fname_buf),
-			    "SP/%s/pps.xml", ctx->fqdn);
+			    "/data/misc/wifi/hs20/SP/%s/pps.xml", ctx->fqdn);
 		pps_fname = pps_fname_buf;
 
 		res = os_snprintf(ca_fname_buf, sizeof(ca_fname_buf),
-				  "SP/%s/ca.pem", buf);
+				  "/data/misc/wifi/hs20/SP/%s/ca.pem", buf);
 		if (os_snprintf_error(sizeof(ca_fname_buf), res)) {
 			os_free(ctx->fqdn);
 			ctx->fqdn = NULL;
@@ -3084,7 +3091,7 @@ static int init_ctx(struct hs20_osu_client *ctx)
 	if (ctx->xml == NULL)
 		return -1;
 
-	devinfo = node_from_file(ctx->xml, "devinfo.xml");
+	devinfo = node_from_file(ctx->xml, "/data/misc/wifi/hs20/devinfo.xml");
 	if (devinfo) {
 		devid = get_node(ctx->xml, devinfo, "DevId");
 		if (devid) {
@@ -3194,8 +3201,14 @@ int main(int argc, char *argv[])
 	extern int wpa_debug_show_keys;
 	extern int wpa_debug_timestamp;
 
-	if (init_ctx(&ctx) < 0)
+	wpa_printf(MSG_ERROR, "####################");
+	wpa_printf(MSG_ERROR, "## OSU Main Entry ##");
+	wpa_printf(MSG_ERROR, "####################");
+	if (init_ctx(&ctx) < 0) {
+		wpa_printf(MSG_ERROR, "init_ctx fail");
 		return -1;
+	}
+	wpa_printf(MSG_ERROR, "[MTK] @0");
 
 	for (;;) {
 		c = getopt(argc, argv, "df:hKNo:O:qr:s:S:tTw:x:");
@@ -3247,6 +3260,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'h':
 		default:
+			wpa_printf(MSG_ERROR, "goes into default");
 			usage();
 			exit(0);
 			break;
@@ -3254,6 +3268,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (argc - optind < 1) {
+		wpa_printf(MSG_ERROR, "[MTK] @1");
 		usage();
 		exit(0);
 	}

@@ -1019,7 +1019,14 @@ int wpa_supplicant_create_ap(struct wpa_supplicant *wpa_s,
 		return -1;
 	}
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	wpa_s->ap_iface = hapd_iface = hostapd_iface_alloc(&wpa_s->global->hapd_ifaces);
+	wpa_printf(MSG_INFO, "ML: interfaces=%p alloc count=%u",
+		&wpa_s->global->hapd_ifaces,
+		(unsigned int)wpa_s->global->hapd_ifaces.count);
+#else
 	wpa_s->ap_iface = hapd_iface = hostapd_alloc_iface();
+#endif
 	if (hapd_iface == NULL)
 		return -1;
 	hapd_iface->owner = wpa_s;
@@ -1138,6 +1145,12 @@ int wpa_supplicant_create_ap(struct wpa_supplicant *wpa_s,
 
 void wpa_supplicant_ap_deinit(struct wpa_supplicant *wpa_s)
 {
+#ifdef CONFIG_MTK_IEEE80211BE
+	struct hapd_interfaces *interfaces;
+	struct hostapd_iface *hapd_iface;
+	size_t i, k = 0;
+#endif
+
 #ifdef CONFIG_WPS
 	eloop_cancel_timeout(wpas_wps_ap_pin_timeout, wpa_s, NULL);
 #endif /* CONFIG_WPS */
@@ -1151,6 +1164,29 @@ void wpa_supplicant_ap_deinit(struct wpa_supplicant *wpa_s)
 	wpas_p2p_ap_deinit(wpa_s);
 	wpa_s->ap_iface->driver_ap_teardown =
 		!!(wpa_s->drv_flags & WPA_DRIVER_FLAGS_AP_TEARDOWN_SUPPORT);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	interfaces = &wpa_s->global->hapd_ifaces;
+	for (i = 0; i < interfaces->count; i++) {
+		hapd_iface = interfaces->iface[i];
+		if (hapd_iface != wpa_s->ap_iface)
+			continue;
+		k = i;
+		while (k < (interfaces->count - 1)) {
+			interfaces->iface[k] =
+				interfaces->iface[k + 1];
+			k++;
+		}
+		interfaces->count--;
+		wpa_printf(MSG_INFO, "ML: interfaces=%p deinit count=%u",
+			interfaces, (unsigned int)interfaces->count);
+		if (interfaces->count == 0) {
+			os_free(interfaces->iface);
+			interfaces->iface = NULL;
+		}
+		break;
+	}
+#endif
 
 	hostapd_interface_deinit(wpa_s->ap_iface);
 	hostapd_interface_free(wpa_s->ap_iface);

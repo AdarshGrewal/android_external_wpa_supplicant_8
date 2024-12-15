@@ -18,6 +18,8 @@
 #include "wpa_auth_ie.h"
 #include "wpa_auth_i.h"
 
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
 
 #ifdef CONFIG_RSN_TESTING
 int rsn_testing = 0;
@@ -938,7 +940,8 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 	for (i = 0; i < data.num_pmkid; i++) {
 		wpa_hexdump(MSG_DEBUG, "RSN IE: STA PMKID",
 			    &data.pmkid[i * PMKID_LEN], PMKID_LEN);
-		sm->pmksa = pmksa_cache_auth_get(wpa_auth->pmksa, sm->addr,
+		sm->pmksa = pmksa_cache_auth_get(wpa_auth->pmksa,
+						 ml_auth_spa(sm, sm->addr),
 						 &data.pmkid[i * PMKID_LEN]);
 		if (sm->pmksa) {
 			pmkid = sm->pmksa->pmkid;

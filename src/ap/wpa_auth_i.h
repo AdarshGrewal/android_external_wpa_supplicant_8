@@ -15,6 +15,9 @@
 #define RSNA_MAX_EAPOL_RETRIES 4
 
 struct wpa_group;
+#ifdef CONFIG_MTK_IEEE80211BE
+struct wpa_ml_ie_parse;
+#endif
 
 struct wpa_state_machine {
 	struct wpa_authenticator *wpa_auth;
@@ -95,6 +98,12 @@ struct wpa_state_machine {
 #endif /* CONFIG_IEEE80211R_AP */
 	unsigned int is_wnmsleep:1;
 	unsigned int pmkid_set:1;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	unsigned int dot11MultiLinkActivated:1;
+
+	struct wpa_ml_ie_parse *sta_ml_ie;
+#endif
 
 #ifdef CONFIG_OCV
 	int ocv_enabled;

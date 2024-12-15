@@ -33,6 +33,9 @@
 #include "wpa_auth_i.h"
 #include "wpa_auth_ie.h"
 
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
+
 #define STATE_MACHINE_DATA struct wpa_state_machine
 #define STATE_MACHINE_DEBUG_PREFIX "WPA"
 #define STATE_MACHINE_ADDR sm->addr
@@ -330,7 +333,7 @@ static void wpa_rekey_gmk(void *eloop_ctx, void *timeout_ctx)
 }
 
 
-static void wpa_rekey_gtk(void *eloop_ctx, void *timeout_ctx)
+void wpa_rekey_gtk(void *eloop_ctx, void *timeout_ctx)
 {
 	struct wpa_authenticator *wpa_auth = eloop_ctx;
 	struct wpa_group *group, *next;
@@ -762,6 +765,9 @@ static void wpa_free_sta_sm(struct wpa_state_machine *sm)
 #ifdef CONFIG_DPP2
 	wpabuf_clear_free(sm->dpp_z);
 #endif /* CONFIG_DPP2 */
+#ifdef CONFIG_MTK_IEEE80211BE
+	os_free(sm->sta_ml_ie);
+#endif
 	bin_clear_free(sm, sizeof(*sm));
 }
 
@@ -1109,6 +1115,9 @@ void wpa_receive(struct wpa_authenticator *wpa_auth,
 		msg = GROUP_2;
 		msgtxt = "2/2 Group";
 	} else if (key_data_length == 0 ||
+#ifdef CONFIG_MTK_IEEE80211BE
+		   key_data_length == 12 /* len of mac addr kde */ ||
+#endif
 		   (mic_len == 0 && (key_info & WPA_KEY_INFO_ENCR_KEY_DATA) &&
 		    key_data_length == AES_BLOCK_SIZE)) {
 		msg = PAIRWISE_4;
@@ -1265,6 +1274,13 @@ continue_processing:
 					   WLAN_REASON_PREV_AUTH_NOT_VALID);
 			return;
 		}
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (ml_process_m2_kde(sm, key_data, key_data_length)) {
+			wpa_auth_vlogger(wpa_auth, sm->addr, LOGGER_INFO,
+					 "received invalid ML EAPOL-Key msg 2/4 - dropped");
+			return;
+		}
+#endif
 		break;
 	case PAIRWISE_4:
 		if (sm->wpa_ptk_state != WPA_PTK_PTKINITNEGOTIATING ||
@@ -1274,6 +1290,13 @@ continue_processing:
 					 sm->wpa_ptk_state);
 			return;
 		}
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (ml_process_m4_kde(sm, key_data, key_data_length)) {
+			wpa_auth_vlogger(wpa_auth, sm->addr, LOGGER_INFO,
+					 "received invalid ML EAPOL-Key msg 4/4 - dropped");
+			return;
+		}
+#endif
 		break;
 	case GROUP_2:
 		if (sm->wpa_ptk_group_state != WPA_PTK_GROUP_REKEYNEGOTIATING
@@ -1380,6 +1403,9 @@ continue_processing:
 			   wpa_parse_kde_ies(key_data, key_data_length,
 					     &kde) == 0 &&
 			   kde.mac_addr) {
+#ifdef CONFIG_MTK_IEEE80211BE
+			ml_rekey_gtk(sm, &kde);
+#endif /* CONFIG_MTK_IEEE80211BE */
 		} else {
 			wpa_auth_logger(wpa_auth, sm->addr, LOGGER_INFO,
 					"received EAPOL-Key Request for GTK rekeying");
@@ -2188,7 +2214,13 @@ SM_STATE(WPA_PTK, INITPSK)
 
 SM_STATE(WPA_PTK, PTKSTART)
 {
-	u8 buf[2 + RSN_SELECTOR_LEN + PMKID_LEN], *pmkid = NULL;
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 buf[2 + RSN_SELECTOR_LEN + PMKID_LEN +
+	       2 + RSN_SELECTOR_LEN + ETH_ALEN];
+#else
+	u8 buf[2 + RSN_SELECTOR_LEN + PMKID_LEN];
+#endif
+	u8 *pmkid = NULL;
 	size_t pmkid_len = 0;
 
 	SM_ENTRY_MA(WPA_PTK, PTKSTART, wpa_ptk);
@@ -2282,8 +2314,10 @@ SM_STATE(WPA_PTK, PTKSTART)
 			 * Calculate PMKID since no PMKSA cache entry was
 			 * available with pre-calculated PMKID.
 			 */
-			rsn_pmkid(sm->PMK, sm->pmk_len, sm->wpa_auth->addr,
-				  sm->addr, &pmkid[2 + RSN_SELECTOR_LEN],
+			rsn_pmkid(sm->PMK, sm->pmk_len,
+				  ml_auth_aa(sm, sm->wpa_auth->addr),
+				  ml_auth_spa(sm, sm->addr),
+				  &pmkid[2 + RSN_SELECTOR_LEN],
 				  sm->wpa_key_mgmt);
 			wpa_hexdump(MSG_DEBUG,
 				    "RSN: Message 1/4 PMKID derived from PMK",
@@ -2292,6 +2326,13 @@ SM_STATE(WPA_PTK, PTKSTART)
 	}
 	if (!pmkid)
 		pmkid_len = 0;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (!pmkid)
+		pmkid = buf;
+	pmkid_len = ml_add_m1_kde(sm, pmkid + pmkid_len) - pmkid;
+#endif
+
 	wpa_send_eapol(sm->wpa_auth, sm,
 		       WPA_KEY_INFO_ACK | WPA_KEY_INFO_KEY_TYPE, NULL,
 		       sm->ANonce, pmkid, pmkid_len, 0, 0);
@@ -2342,7 +2383,8 @@ static int wpa_derive_ptk(struct wpa_state_machine *sm, const u8 *snonce,
 	if (force_sha256)
 		akmp |= WPA_KEY_MGMT_PSK_SHA256;
 	return wpa_pmk_to_ptk(pmk, pmk_len, "Pairwise key expansion",
-			      sm->wpa_auth->addr, sm->addr, sm->ANonce, snonce,
+			      ml_auth_aa(sm, sm->wpa_auth->addr),
+			      ml_auth_spa(sm, sm->addr), sm->ANonce, snonce,
 			      ptk, akmp, sm->pairwise, z, z_len, kdk_len);
 }
 
@@ -3521,11 +3563,15 @@ SM_STATE(WPA_PTK, PTKINITNEGOTIATING)
 		kde_len += 2 + RSN_SELECTOR_LEN + 2;
 #endif /* CONFIG_DPP2 */
 
-	kde = os_malloc(kde_len);
+	kde = os_malloc(kde_len + 1000);
 	if (!kde)
 		goto done;
 
 	pos = kde;
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated)
+		goto skip;
+#endif
 	os_memcpy(pos, wpa_ie, wpa_ie_len);
 	pos += wpa_ie_len;
 #ifdef CONFIG_IEEE80211R_AP
@@ -3557,6 +3603,10 @@ SM_STATE(WPA_PTK, PTKINITNEGOTIATING)
 				  gtk, gtk_len);
 	}
 	pos = ieee80211w_kde_add(sm, pos);
+#ifdef CONFIG_MTK_IEEE80211BE
+skip:
+	pos = ml_add_m3_kde(sm, pos);
+#endif
 	if (ocv_oci_add(sm, &pos, conf->oci_freq_override_eapol_m3) < 0)
 		goto done;
 
@@ -3900,17 +3950,28 @@ SM_STATE(WPA_PTK_GROUP, REKEYNEGOTIATING)
 	}
 	if (sm->wpa == WPA_VERSION_WPA2) {
 		kde_len = 2 + RSN_SELECTOR_LEN + 2 + gsm->GTK_len +
-			ieee80211w_kde_len(sm) + ocv_oci_len(sm);
+			ieee80211w_kde_len(sm) + ocv_oci_len(sm) + 500;
 		kde_buf = os_malloc(kde_len);
 		if (!kde_buf)
 			return;
 
 		kde = pos = kde_buf;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (sm->dot11MultiLinkActivated)
+			goto skip;
+#endif  /* CONFIG_MTK_IEEE80211BE */
+
 		hdr[0] = gsm->GN & 0x03;
 		hdr[1] = 0;
 		pos = wpa_add_kde(pos, RSN_KEY_DATA_GROUPKEY, hdr, 2,
 				  gtk, gsm->GTK_len);
 		pos = ieee80211w_kde_add(sm, pos);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+skip:
+		pos = ml_add_1_of_2_kde(sm, pos);
+#endif /* CONFIG_MTK_IEEE80211BE */
 		if (ocv_oci_add(sm, &pos,
 				conf->oci_freq_override_eapol_g1) < 0) {
 			os_free(kde_buf);
@@ -4800,7 +4861,8 @@ int wpa_auth_pmksa_add(struct wpa_state_machine *sm, const u8 *pmk,
 	wpa_hexdump_key(MSG_DEBUG, "RSN: Cache PMK", pmk, pmk_len);
 	if (pmksa_cache_auth_add(sm->wpa_auth->pmksa, pmk, pmk_len, NULL,
 				 sm->PTK.kck, sm->PTK.kck_len,
-				 sm->wpa_auth->addr, sm->addr, session_timeout,
+				 ml_auth_aa(sm, sm->wpa_auth->addr),
+				 ml_auth_spa(sm, sm->addr), session_timeout,
 				 eapol, sm->wpa_key_mgmt))
 		return 0;
 
@@ -4810,7 +4872,7 @@ int wpa_auth_pmksa_add(struct wpa_state_machine *sm, const u8 *pmk,
 
 int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
 			       const u8 *pmk, size_t len, const u8 *sta_addr,
-			       int session_timeout,
+			       const u8 *aa, int session_timeout,
 			       struct eapol_state_machine *eapol)
 {
 	if (!wpa_auth)
@@ -4819,7 +4881,7 @@ int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
 	wpa_hexdump_key(MSG_DEBUG, "RSN: Cache PMK from preauth", pmk, len);
 	if (pmksa_cache_auth_add(wpa_auth->pmksa, pmk, len, NULL,
 				 NULL, 0,
-				 wpa_auth->addr,
+				 aa,
 				 sta_addr, session_timeout, eapol,
 				 WPA_KEY_MGMT_IEEE8021X))
 		return 0;
@@ -4829,7 +4891,7 @@ int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
 
 
 int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
-			   const u8 *pmk, const u8 *pmkid)
+			   const u8 *aa, const u8 *pmk, const u8 *pmkid)
 {
 	if (wpa_auth->conf.disable_pmksa_caching)
 		return -1;
@@ -4837,7 +4899,7 @@ int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
 	wpa_hexdump_key(MSG_DEBUG, "RSN: Cache PMK from SAE", pmk, PMK_LEN);
 	if (pmksa_cache_auth_add(wpa_auth->pmksa, pmk, PMK_LEN, pmkid,
 				 NULL, 0,
-				 wpa_auth->addr, addr, 0, NULL,
+				 aa, addr, 0, NULL,
 				 WPA_KEY_MGMT_SAE))
 		return 0;
 
@@ -4862,6 +4924,23 @@ int wpa_auth_pmksa_add2(struct wpa_authenticator *wpa_auth, const u8 *addr,
 	wpa_hexdump_key(MSG_DEBUG, "RSN: Cache PMK (2)", pmk, PMK_LEN);
 	if (pmksa_cache_auth_add(wpa_auth->pmksa, pmk, pmk_len, pmkid,
 				 NULL, 0, wpa_auth->addr, addr, session_timeout,
+				 NULL, akmp))
+		return 0;
+
+	return -1;
+}
+
+
+int wpa_auth_pmksa_add3(struct wpa_authenticator *wpa_auth, const u8 *addr,
+			const u8 *aa, const u8 *pmk, size_t pmk_len,
+			const u8 *pmkid, int session_timeout, int akmp)
+{
+	if (!wpa_auth || wpa_auth->conf.disable_pmksa_caching)
+		return -1;
+
+	wpa_hexdump_key(MSG_DEBUG, "RSN: Cache PMK (3)", pmk, PMK_LEN);
+	if (pmksa_cache_auth_add(wpa_auth->pmksa, pmk, pmk_len, pmkid,
+				 NULL, 0, aa, addr, session_timeout,
 				 NULL, akmp))
 		return 0;
 

@@ -88,6 +88,10 @@ struct wpa_bss {
 	unsigned int flags;
 	/** BSSID */
 	u8 bssid[ETH_ALEN];
+#ifdef CONFIG_MTK_IEEE80211BE
+	/** Authenticator */
+	u8 aa[ETH_ALEN];
+#endif /* CONFIG_MTK_IEEE80211BE */
 	/** HESSID */
 	u8 hessid[ETH_ALEN];
 	/** SSID */

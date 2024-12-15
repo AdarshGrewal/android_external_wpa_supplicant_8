@@ -151,6 +151,7 @@ static int cred_with_roaming_consortium(struct wpa_supplicant *wpa_s)
 		if (cred->num_roaming_consortiums)
 			return 1;
 	}
+	wpa_printf(MSG_DEBUG, "cred_with_roaming_consortium return 0!!!");
 	return 0;
 }
 
@@ -170,15 +171,27 @@ static int cred_with_3gpp(struct wpa_supplicant *wpa_s)
 static int cred_with_nai_realm(struct wpa_supplicant *wpa_s)
 {
 	struct wpa_cred *cred;
+	wpa_printf(MSG_DEBUG, "cred_with_nai_realm+");
 
 	for (cred = wpa_s->conf->cred; cred; cred = cred->next) {
-		if (cred->pcsc || cred->imsi)
+		wpa_printf(MSG_DEBUG, "== cred_id[%d] ==",cred->id);
+		if (cred->pcsc || cred->imsi) {
+			wpa_printf(MSG_DEBUG,
+				"pcsc[%d] imsi[%s]",
+				cred->pcsc,
+				cred->imsi ? cred->imsi : "null");
 			continue;
-		if (!cred->eap_method)
+		}
+		if (!cred->eap_method) {
+			wpa_printf(MSG_DEBUG, "eap_method is valid");
 			return 1;
-		if (cred->realm)
+		}
+		if (cred->realm) {
+			wpa_printf(MSG_DEBUG, "have realm:%s", cred->realm);
 			return 1;
 	}
+	}
+	wpa_printf(MSG_DEBUG, "cred_with_nai_realm-");
 	return 0;
 }
 
@@ -231,8 +244,11 @@ static int additional_roaming_consortiums(struct wpa_bss *bss)
 {
 	const u8 *ie;
 	ie = wpa_bss_get_ie(bss, WLAN_EID_ROAMING_CONSORTIUM);
-	if (ie == NULL || ie[1] == 0)
+	if (ie == NULL || ie[1] == 0) {
+		wpa_printf(MSG_DEBUG, "additional_roaming_consortiums return 0!!!");
 		return 0;
+	}
+	wpa_printf(MSG_DEBUG, "additional_roaming_consortiums ie[2]=%d", ie[2]);
 	return ie[2]; /* Number of ANQP OIs */
 }
 
@@ -1133,17 +1149,21 @@ static int roaming_consortium_anqp_match(const struct wpabuf *anqp,
 
 	pos = wpabuf_head(anqp);
 	end = pos + wpabuf_len(anqp);
+	wpa_hexdump_ascii(MSG_DEBUG, "roaming_consortium_anqp_match: ie:",
+				  pos, wpabuf_len(anqp));
+	wpa_printf(MSG_DEBUG, "rc[%d]:%s",(int)rc_len, (char *)rc_id);
 
 	/* Set of <OI Length, OI> duples */
 	while (pos < end) {
 		len = *pos++;
 		if (len > end - pos)
 			break;
-		if (len == rc_len && os_memcmp(pos, rc_id, rc_len) == 0)
+		if (len == rc_len && os_memcmp(pos, rc_id, rc_len - 1) == 0)
 			return 1;
 		pos += len;
 	}
 
+	wpa_printf(MSG_DEBUG, "roaming_consortium_anqp_match return 0");
 	return 0;
 }
 
@@ -1183,8 +1203,13 @@ static int cred_no_required_oi_match(struct wpa_cred *cred, struct wpa_bss *bss)
 	ie = wpa_bss_get_ie(bss, WLAN_EID_ROAMING_CONSORTIUM);
 
 	if (ie == NULL &&
-	    (bss->anqp == NULL || bss->anqp->roaming_consortium == NULL))
+		(bss->anqp == NULL || bss->anqp->roaming_consortium == NULL)) {
+		wpa_printf(MSG_DEBUG, "ie[%s] bss->anqp[%s] roaming_consortium[%s]",
+		ie == NULL ? "null" : "valid",
+		bss->anqp == NULL ? "null" : "valid",
+		bss->anqp->roaming_consortium == NULL ? "null" : "valid");
 		return 1;
+	}
 
 	return !roaming_consortium_match(ie,
 					 bss->anqp ?
@@ -2102,39 +2127,59 @@ static struct wpa_cred * interworking_credentials_available_realm(
 		return NULL;
 	}
 
+	wpa_printf(MSG_DEBUG, "interworking_credentials_available_realm+");
+
 	for (cred = wpa_s->conf->cred; cred; cred = cred->next) {
-		if (cred->realm == NULL)
+		if (cred->realm == NULL) {
+			wpa_printf(MSG_DEBUG, "cred->realm = null");
 			continue;
+		}
 
 		for (i = 0; i < count; i++) {
-			if (!nai_realm_match(&realm[i], cred->realm))
+			if (!nai_realm_match(&realm[i], cred->realm)) {
+				wpa_printf(MSG_DEBUG, "cred->realm not match");
 				continue;
+			}
 			if (nai_realm_find_eap(wpa_s, cred, &realm[i])) {
-				if (cred_no_required_oi_match(cred, bss))
+				if (cred_no_required_oi_match(cred, bss)) {
+					wpa_printf(MSG_DEBUG, "no required oi match");
 					continue;
+				}
 				if (!ignore_bw &&
-				    cred_below_min_backhaul(wpa_s, cred, bss))
+					cred_below_min_backhaul(wpa_s, cred, bss)) {
+						wpa_printf(MSG_DEBUG, "@@1");
 					continue;
+				}
 				if (!ignore_bw &&
-				    cred_over_max_bss_load(wpa_s, cred, bss))
+					cred_over_max_bss_load(wpa_s, cred, bss)) {
+						wpa_printf(MSG_DEBUG, "@@2");
 					continue;
+				}
 				if (!ignore_bw &&
-				    cred_conn_capab_missing(wpa_s, cred, bss))
+					cred_conn_capab_missing(wpa_s, cred, bss)) {
+						wpa_printf(MSG_DEBUG, "@@3");
 					continue;
+				}
 				if (cred_excluded_ssid(cred, bss)) {
-					if (excluded == NULL)
+					if (excluded == NULL) {
+						wpa_printf(MSG_DEBUG, "@@4");
 						continue;
+					}
 					if (selected == NULL) {
 						selected = cred;
 						is_excluded = 1;
+						wpa_printf(MSG_DEBUG, "@@5");
 					}
+					wpa_printf(MSG_DEBUG, "@@11");
 				} else {
 					if (selected == NULL || is_excluded ||
 					    cred_prio_cmp(selected, cred) < 0)
 					{
 						selected = cred;
 						is_excluded = 0;
+						wpa_printf(MSG_DEBUG, "@@6");
 					}
+					wpa_printf(MSG_DEBUG, "@@12");
 				}
 				break;
 			} else {
@@ -2143,6 +2188,7 @@ static struct wpa_cred * interworking_credentials_available_realm(
 			}
 		}
 	}
+	wpa_printf(MSG_DEBUG, "interworking_credentials_available_realm-");
 
 	nai_realm_free(realm, count);
 
@@ -2208,8 +2254,12 @@ static struct wpa_cred * interworking_credentials_available(
 		*excluded = 0;
 	cred = interworking_credentials_available_helper(wpa_s, bss, 0,
 							 excluded);
-	if (cred)
+	wpa_printf(MSG_DEBUG, "interworking_credentials_available @1");
+	if (cred) {
+		wpa_printf(MSG_DEBUG, "Return cred @1");
 		return cred;
+	}
+	wpa_printf(MSG_DEBUG, "interworking_credentials_available @2");
 	return interworking_credentials_available_helper(wpa_s, bss, 1,
 							 excluded);
 }
@@ -2475,8 +2525,10 @@ static void interworking_select_network(struct wpa_supplicant *wpa_s)
 		int bh, bss_load, conn_capab;
 		cred = interworking_credentials_available(wpa_s, bss,
 							  &excluded);
-		if (!cred)
+		if (!cred) {
+			wpa_printf(MSG_DEBUG, "Can't find a suitable cred");
 			continue;
+		}
 
 		if (!wpa_bss_get_ie(bss, WLAN_EID_RSN)) {
 			/*

@@ -31,6 +31,10 @@
 #include "sme.h"
 #include "hs20_supplicant.h"
 
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
+#include "rsn_supp/wpa_i.h"
+
 #define SME_AUTH_TIMEOUT 5
 #define SME_ASSOC_TIMEOUT 5
 
@@ -38,7 +42,7 @@ static void sme_auth_timer(void *eloop_ctx, void *timeout_ctx);
 static void sme_assoc_timer(void *eloop_ctx, void *timeout_ctx);
 static void sme_obss_scan_timeout(void *eloop_ctx, void *timeout_ctx);
 static void sme_stop_sa_query(struct wpa_supplicant *wpa_s);
-
+static int sme_sae_set_pmk(struct wpa_supplicant *wpa_s, const u8 *bssid);
 
 #ifdef CONFIG_SAE
 
@@ -94,6 +98,8 @@ static struct wpabuf * sme_auth_build_sae_commit(struct wpa_supplicant *wpa_s,
 	int use_pt = 0;
 	bool use_pk = false;
 	u8 rsnxe_capa = 0;
+	const u8 *aa = bssid;
+	const u8 *spa = wpa_s->own_addr;
 
 	if (ret_use_pt)
 		*ret_use_pt = 0;
@@ -151,6 +157,17 @@ static struct wpabuf * sme_auth_build_sae_commit(struct wpa_supplicant *wpa_s,
 			rsnxe_capa = rsnxe[2];
 	}
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (wpa_s->sme.sae.dot11MultiLinkActivated) {
+		spa = wpa_s->sme.sae.own_ml_addr;
+		aa = wpa_s->sme.sae.peer_ml_addr;
+		wpa_printf(MSG_DEBUG,
+			"ML: SAE build commit own_mld_addr=" MACSTR " peer_mld_addr=" MACSTR,
+			MAC2STR(wpa_s->sme.sae.own_ml_addr),
+			MAC2STR(wpa_s->sme.sae.peer_ml_addr));
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 	if (ssid->sae_password_id && wpa_s->conf->sae_pwe != 3)
 		use_pt = 1;
 #ifdef CONFIG_SAE_PK
@@ -185,11 +202,11 @@ static struct wpabuf * sme_auth_build_sae_commit(struct wpa_supplicant *wpa_s,
 
 	if (use_pt &&
 	    sae_prepare_commit_pt(&wpa_s->sme.sae, ssid->pt,
-				  wpa_s->own_addr, bssid,
+				  spa, aa,
 				  wpa_s->sme.sae_rejected_groups, NULL) < 0)
 		return NULL;
 	if (!use_pt &&
-	    sae_prepare_commit(wpa_s->own_addr, bssid,
+	    sae_prepare_commit(spa, aa,
 			       (u8 *) password, os_strlen(password),
 			       &wpa_s->sme.sae) < 0) {
 		wpa_printf(MSG_DEBUG, "SAE: Could not pick PWE");
@@ -1099,6 +1116,9 @@ static int sme_external_auth_send_sae_commit(struct wpa_supplicant *wpa_s,
 		status = WLAN_STATUS_SUCCESS;
 	sme_external_auth_build_buf(buf, resp, wpa_s->own_addr,
 				    bssid, 1, wpa_s->sme.seq_num, status);
+#ifdef CONFIG_MTK_IEEE80211BE
+	ml_sae_write_auth(&wpa_s->sme.sae, buf);
+#endif /* CONFIG_MTK_IEEE80211BE */
 	wpa_drv_send_mlme(wpa_s, wpabuf_head(buf), wpabuf_len(buf), 1, 0, 0);
 	wpabuf_free(resp);
 	wpabuf_free(buf);
@@ -1169,6 +1189,9 @@ static void sme_external_auth_send_sae_confirm(struct wpa_supplicant *wpa_s,
 	sme_external_auth_build_buf(buf, resp, wpa_s->own_addr,
 				    da, 2, wpa_s->sme.seq_num,
 				    WLAN_STATUS_SUCCESS);
+#ifdef CONFIG_MTK_IEEE80211BE
+	ml_sae_write_auth(&wpa_s->sme.sae, buf);
+#endif /* CONFIG_MTK_IEEE80211BE */
 	wpa_drv_send_mlme(wpa_s, wpabuf_head(buf), wpabuf_len(buf), 1, 0, 0);
 	wpabuf_free(resp);
 	wpabuf_free(buf);
@@ -1193,6 +1216,26 @@ void sme_external_auth_trigger(struct wpa_supplicant *wpa_s,
 		wpa_s->sme.seq_num = 0;
 		wpa_s->sme.sae.state = SAE_NOTHING;
 		wpa_s->sme.sae.send_confirm = 0;
+#ifdef CONFIG_MTK_IEEE80211BE
+		wpa_s->sme.sae.dot11MultiLinkActivated =
+			data->external_auth.dot11MultiLinkActivated;
+		if (wpa_s->sme.sae.dot11MultiLinkActivated &&
+		    data->external_auth.own_ml_addr &&
+		    data->external_auth.peer_ml_addr) {
+			os_memcpy(wpa_s->sme.sae.own_ml_addr,
+				  data->external_auth.own_ml_addr, ETH_ALEN);
+			os_memcpy(wpa_s->sme.sae.peer_ml_addr,
+				  data->external_auth.peer_ml_addr, ETH_ALEN);
+			wpa_printf(MSG_DEBUG,
+				"ML: SAE auth trigger own_mld_addr=" MACSTR " peer_mld_addr=" MACSTR,
+				MAC2STR(wpa_s->sme.sae.own_ml_addr),
+				MAC2STR(wpa_s->sme.sae.peer_ml_addr));
+		} else {
+			os_memset(wpa_s->sme.sae.own_ml_addr, 0, ETH_ALEN);
+			os_memset(wpa_s->sme.sae.peer_ml_addr, 0, ETH_ALEN);
+		}
+
+#endif /* CONFIG_MTK_IEEE80211BE */
 		wpa_s->sme.sae_group_index = 0;
 		if (sme_handle_external_auth_start(wpa_s, data) < 0)
 			sme_send_external_auth_status(wpa_s,
@@ -1446,6 +1489,10 @@ static int sme_sae_auth(struct wpa_supplicant *wpa_s, u16 auth_transaction,
 		wpa_s->sme.sae.state = SAE_ACCEPTED;
 		sae_clear_temp_data(&wpa_s->sme.sae);
 
+#ifdef CONFIG_MTK_COMMON
+		sme_sae_set_pmk(wpa_s, wpa_s->sme.ext_auth_bssid);
+#endif
+
 		if (external) {
 			/* Report success to driver */
 			sme_send_external_auth_status(wpa_s,
@@ -1463,8 +1510,15 @@ static int sme_sae_set_pmk(struct wpa_supplicant *wpa_s, const u8 *bssid)
 {
 	wpa_printf(MSG_DEBUG,
 		   "SME: SAE completed - setting PMK for 4-way handshake");
-	wpa_sm_set_pmk(wpa_s->wpa, wpa_s->sme.sae.pmk, PMK_LEN,
-		       wpa_s->sme.sae.pmkid, bssid);
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (wpa_s->sme.sae.dot11MultiLinkActivated)
+		wpa_sm_set_pmk(wpa_s->wpa, wpa_s->sme.sae.pmk, PMK_LEN,
+			       wpa_s->sme.sae.pmkid, wpa_s->sme.sae.own_ml_addr,
+			       wpa_s->sme.sae.peer_ml_addr);
+	else
+#endif /* CONFIG_MTK_IEEE80211BE */
+		wpa_sm_set_pmk(wpa_s->wpa, wpa_s->sme.sae.pmk, PMK_LEN,
+			       wpa_s->sme.sae.pmkid, wpa_s->wpa->own_addr, bssid);
 	if (wpa_s->conf->sae_pmkid_in_assoc) {
 		/* Update the own RSNE contents now that we have set the PMK
 		 * and added a PMKSA cache entry based on the successfully
@@ -1522,9 +1576,10 @@ void sme_external_auth_mgmt_rx(struct wpa_supplicant *wpa_s,
 		}
 		if (res != 1)
 			return;
-
+#ifndef CONFIG_MTK_COMMON
 		if (sme_sae_set_pmk(wpa_s, wpa_s->sme.ext_auth_bssid) < 0)
 			return;
+#endif
 	}
 }
 

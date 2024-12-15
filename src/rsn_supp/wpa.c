@@ -35,6 +35,9 @@
 #include "wpa_supplicant_i.h"
 #include "driver_i.h"
 
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
+
 static const u8 null_rsc[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 
@@ -212,6 +215,10 @@ void wpa_sm_key_request(struct wpa_sm *sm, int error, int pairwise)
 
 	mic_len = wpa_mic_len(sm->key_mgmt, sm->pmk_len);
 	hdrlen = sizeof(*reply) + mic_len + 2;
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated)
+		hdrlen += (2 + RSN_SELECTOR_LEN + ETH_ALEN); /* MAC addr KDE */
+#endif
 	rbuf = wpa_sm_alloc_eapol(sm, IEEE802_1X_TYPE_EAPOL_KEY, NULL,
 				  hdrlen, &rlen, (void *) &reply);
 	if (rbuf == NULL)
@@ -236,7 +243,12 @@ void wpa_sm_key_request(struct wpa_sm *sm, int error, int pairwise)
 	inc_byte_array(sm->request_counter, WPA_REPLAY_COUNTER_LEN);
 
 	mic = (u8 *) (reply + 1);
+#ifdef CONFIG_MTK_IEEE80211BE
+	WPA_PUT_BE16(mic + mic_len, ml_add_key_request_kde(sm, mic +
+		mic_len + 2 /* offset for key data len */));
+#else
 	WPA_PUT_BE16(mic + mic_len, 0);
+#endif
 	if (!(key_info & WPA_KEY_INFO_MIC))
 		key_mic = NULL;
 	else
@@ -490,7 +502,7 @@ int wpa_supplicant_send_2_of_4(struct wpa_sm *sm, const unsigned char *dst,
 	size_t mic_len, hdrlen, rlen;
 	struct wpa_eapol_key *reply;
 	u8 *rbuf, *key_mic;
-	u8 *rsn_ie_buf = NULL;
+	u8 *rsn_ie_buf = NULL, *ml_ie_buf = NULL;
 	u16 key_info;
 
 	if (wpa_ie == NULL) {
@@ -537,6 +549,25 @@ int wpa_supplicant_send_2_of_4(struct wpa_sm *sm, const unsigned char *dst,
 	}
 #endif /* CONFIG_IEEE80211R */
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated) {
+		wpa_hexdump(MSG_DEBUG, "ML: WPA IE before ML processing",
+			    wpa_ie, wpa_ie_len);
+
+		ml_ie_buf = os_malloc(wpa_ie_len + 100);
+		if (ml_ie_buf == NULL) {
+			os_free(rsn_ie_buf);
+			return -1;
+		}
+		os_memcpy(ml_ie_buf, wpa_ie, wpa_ie_len);
+		wpa_ie_len += ml_add_m2_kde(sm, ml_ie_buf + wpa_ie_len);
+		wpa_ie = ml_ie_buf;
+
+		wpa_hexdump(MSG_DEBUG, "ML: WPA IE after ml kde added",
+			ml_ie_buf, wpa_ie_len);
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 	wpa_hexdump(MSG_DEBUG, "WPA: WPA IE for msg 2/4", wpa_ie, wpa_ie_len);
 
 	mic_len = wpa_mic_len(sm->key_mgmt, sm->pmk_len);
@@ -546,6 +577,7 @@ int wpa_supplicant_send_2_of_4(struct wpa_sm *sm, const unsigned char *dst,
 				  &rlen, (void *) &reply);
 	if (rbuf == NULL) {
 		os_free(rsn_ie_buf);
+		os_free(ml_ie_buf);
 		return -1;
 	}
 
@@ -571,6 +603,7 @@ int wpa_supplicant_send_2_of_4(struct wpa_sm *sm, const unsigned char *dst,
 	WPA_PUT_BE16(key_mic + mic_len, wpa_ie_len); /* Key Data Length */
 	os_memcpy(key_mic + mic_len + 2, wpa_ie, wpa_ie_len); /* Key Data */
 	os_free(rsn_ie_buf);
+	os_free(ml_ie_buf);
 
 	os_memcpy(reply->key_nonce, nonce, WPA_NONCE_LEN);
 
@@ -617,7 +650,8 @@ static int wpa_derive_ptk(struct wpa_sm *sm, const unsigned char *src_addr,
 		kdk_len = 0;
 
 	return wpa_pmk_to_ptk(sm->pmk, sm->pmk_len, "Pairwise key expansion",
-			      sm->own_addr, sm->bssid, sm->snonce,
+			      ml_sm_spa(sm, sm->own_addr),
+			      ml_sm_aa(sm, sm->bssid), sm->snonce,
 			      key->key_nonce, ptk, akmp,
 			      sm->pairwise_cipher, z, z_len,
 			      kdk_len);
@@ -711,6 +745,11 @@ static void wpa_supplicant_process_1_of_4(struct wpa_sm *sm,
 			wpa_hexdump(MSG_DEBUG, "RSN: PMKID from "
 				    "Authenticator", ie.pmkid, PMKID_LEN);
 		}
+
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (ml_process_m1_kde(sm, src_addr, &ie) < 0)
+			goto failed;
+#endif /* CONFIG_MTK_IEEE80211BE */
 	}
 
 	res = wpa_supplicant_get_pmk(sm, src_addr, ie.pmkid);
@@ -1529,6 +1568,11 @@ static int wpa_supplicant_validate_ie(struct wpa_sm *sm,
 				      const unsigned char *src_addr,
 				      struct wpa_eapol_ie_parse *ie)
 {
+#ifdef CONFIG_MTK_IEEE80211BE
+	if(sm->dot11MultiLinkActivated)
+		goto skip;
+#endif
+
 	if (sm->ap_wpa_ie == NULL && sm->ap_rsn_ie == NULL) {
 		wpa_dbg(sm->ctx->msg_ctx, MSG_DEBUG,
 			"WPA: No WPA/RSN IE for this AP known. "
@@ -1593,6 +1637,9 @@ static int wpa_supplicant_validate_ie(struct wpa_sm *sm,
 		return -1;
 	}
 
+#ifdef CONFIG_MTK_IEEE80211BE
+skip:
+#endif
 #ifdef CONFIG_IEEE80211R
 	if (wpa_key_mgmt_ft(sm->key_mgmt) &&
 	    wpa_supplicant_validate_ie_ft(sm, src_addr, ie) < 0)
@@ -1624,6 +1671,10 @@ int wpa_supplicant_send_4_of_4(struct wpa_sm *sm, const unsigned char *dst,
 
 	mic_len = wpa_mic_len(sm->key_mgmt, sm->pmk_len);
 	hdrlen = sizeof(*reply) + mic_len + 2;
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated)
+		hdrlen += (2 + RSN_SELECTOR_LEN + ETH_ALEN); /* MAC addr KDE */
+#endif /* CONFIG_MTK_IEEE80211BE */
 	rbuf = wpa_sm_alloc_eapol(sm, IEEE802_1X_TYPE_EAPOL_KEY, NULL,
 				  hdrlen, &rlen, (void *) &reply);
 	if (rbuf == NULL)
@@ -1647,7 +1698,12 @@ int wpa_supplicant_send_4_of_4(struct wpa_sm *sm, const unsigned char *dst,
 		  WPA_REPLAY_COUNTER_LEN);
 
 	key_mic = (u8 *) (reply + 1);
+#ifdef CONFIG_MTK_IEEE80211BE
+	WPA_PUT_BE16(key_mic + mic_len,	ml_add_m4_kde(sm, key_mic +
+		mic_len + 2 /* offset for key data len */));
+#else
 	WPA_PUT_BE16(key_mic + mic_len, 0);
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	wpa_dbg(sm->ctx->msg_ctx, MSG_INFO, "WPA: Sending EAPOL-Key 4/4");
 	return wpa_eapol_key_send(sm, ptk, ver, dst, ETH_P_EAPOL, rbuf, rlen,
@@ -1696,6 +1752,11 @@ static void wpa_supplicant_process_3_of_4(struct wpa_sm *sm,
 
 	if (wpa_supplicant_validate_ie(sm, sm->bssid, &ie) < 0)
 		goto failed;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_validate_m3_kde(sm, key, &ie) < 0)
+		goto failed;
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	if (wpa_handle_ext_key_id(sm, &ie))
 		goto failed;
@@ -1794,9 +1855,17 @@ static void wpa_supplicant_process_3_of_4(struct wpa_sm *sm,
 	}
 	wpa_sm_set_state(sm, WPA_GROUP_HANDSHAKE);
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_process_m3_kde(sm, key, &ie) < 0)
+		goto failed;
+#endif /* CONFIG_MTK_IEEE80211BE */
 	if (sm->group_cipher == WPA_CIPHER_GTK_NOT_USED) {
 		/* No GTK to be set to the driver */
-	} else if (!ie.gtk && sm->proto == WPA_PROTO_RSN) {
+	} else if (!ie.gtk &&
+#ifdef CONFIG_MTK_IEEE80211BE
+		!sm->dot11MultiLinkActivated &&
+#endif /* CONFIG_MTK_IEEE80211BE */
+		sm->proto == WPA_PROTO_RSN) {
 		wpa_msg(sm->ctx->msg_ctx, MSG_INFO,
 			"RSN: No GTK KDE included in EAPOL-Key msg 3/4");
 		goto failed;
@@ -1814,12 +1883,21 @@ static void wpa_supplicant_process_3_of_4(struct wpa_sm *sm,
 		goto failed;
 	}
 
-	if (sm->group_cipher == WPA_CIPHER_GTK_NOT_USED || ie.gtk)
+	if (sm->group_cipher == WPA_CIPHER_GTK_NOT_USED || ie.gtk
+#ifdef CONFIG_MTK_IEEE80211BE
+	|| ie.mlo_gtk.num > 0
+#endif /* CONFIG_MTK_IEEE80211BE */
+	)
 		wpa_supplicant_key_neg_complete(sm, sm->bssid,
 						key_info & WPA_KEY_INFO_SECURE);
 
-	if (ie.gtk)
+	if (ie.gtk
+#ifdef CONFIG_MTK_IEEE80211BE
+	|| ie.mlo_gtk.num > 0
+#endif /* CONFIG_MTK_IEEE80211BE */
+	)
 		wpa_sm_set_rekey_offload(sm);
+
 
 	/* Add PMKSA cache entry for Suite B AKMs here since PMKID can be
 	 * calculated only after KCK has been derived. Though, do not replace an
@@ -2031,6 +2109,10 @@ static int wpa_supplicant_send_2_of_2(struct wpa_sm *sm,
 
 	mic_len = wpa_mic_len(sm->key_mgmt, sm->pmk_len);
 	hdrlen = sizeof(*reply) + mic_len + 2;
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated)
+		hdrlen += (2 + RSN_SELECTOR_LEN + ETH_ALEN); /* MAC addr KDE */
+#endif /* CONFIG_MTK_IEEE80211BE */
 	rbuf = wpa_sm_alloc_eapol(sm, IEEE802_1X_TYPE_EAPOL_KEY, NULL,
 				  hdrlen + kde_len, &rlen, (void *) &reply);
 	if (rbuf == NULL)
@@ -2054,8 +2136,12 @@ static int wpa_supplicant_send_2_of_2(struct wpa_sm *sm,
 		  WPA_REPLAY_COUNTER_LEN);
 
 	key_mic = (u8 *) (reply + 1);
+#ifdef CONFIG_MTK_IEEE80211BE
+	WPA_PUT_BE16(key_mic + mic_len,
+		ml_add_2_of_2_kde(sm, key_mic + mic_len) + kde_len);
+#else
 	WPA_PUT_BE16(key_mic + mic_len, kde_len); /* Key Data Length */
-
+#endif /* CONFIG_MTK_IEEE80211BE */
 #ifdef CONFIG_OCV
 	if (wpa_sm_ocv_enabled(sm)) {
 		struct wpa_channel_info ci;
@@ -2101,6 +2187,7 @@ static void wpa_supplicant_process_1_of_2(struct wpa_sm *sm,
 	int rekey, ret;
 	struct wpa_gtk_data gd;
 	const u8 *key_rsc;
+	u8 need_install = true;
 
 	if (!sm->msg_3_of_4_ok && !wpa_fils_is_completed(sm)) {
 		wpa_msg(sm->ctx->msg_ctx, MSG_INFO,
@@ -2120,6 +2207,24 @@ static void wpa_supplicant_process_1_of_2(struct wpa_sm *sm,
 		ret = wpa_supplicant_process_1_of_2_rsn(sm, key_data,
 							key_data_len, key_info,
 							&gd);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (sm->dot11MultiLinkActivated) {
+			wpa_sm_set_state(sm, WPA_GROUP_HANDSHAKE);
+			need_install = false;
+			/* basic gtk should not exist */
+			if (ret != -1) {
+				goto failed;
+			} else {
+				ret = ml_process_1_of_2(sm, key, key_data,
+					key_data_len, key_info);
+				if (ret)
+					goto failed;
+				else
+					goto skip;
+			}
+		}
+#endif /* CONFIG_MTK_IEEE80211BE */
 	} else {
 		ret = wpa_supplicant_process_1_of_2_wpa(sm, key, key_data,
 							key_data_len,
@@ -2135,9 +2240,13 @@ static void wpa_supplicant_process_1_of_2(struct wpa_sm *sm,
 	if (wpa_supplicant_rsc_relaxation(sm, key->key_rsc))
 		key_rsc = null_rsc;
 
-	if (wpa_supplicant_install_gtk(sm, &gd, key_rsc, 0) ||
+#ifdef CONFIG_MTK_IEEE80211BE
+skip:
+#endif /* CONFIG_MTK_IEEE80211BE */
+	if ((need_install && wpa_supplicant_install_gtk(sm, &gd, key_rsc, 0)) ||
 	    wpa_supplicant_send_2_of_2(sm, key, ver, key_info) < 0)
 		goto failed;
+
 	forced_memzero(&gd, sizeof(gd));
 
 	if (rekey) {
@@ -2985,6 +3094,10 @@ void wpa_sm_deinit(struct wpa_sm *sm)
 #ifdef CONFIG_DPP2
 	wpabuf_clear_free(sm->dpp_z);
 #endif /* CONFIG_DPP2 */
+#ifdef CONFIG_MTK_IEEE80211BE
+	os_free(sm->sta_ml_ie);
+	os_free(sm->ap_ml_ie);
+#endif
 	os_free(sm);
 }
 
@@ -3116,7 +3229,7 @@ void wpa_sm_notify_disassoc(struct wpa_sm *sm)
  * Configure the PMK for WPA state machine.
  */
 void wpa_sm_set_pmk(struct wpa_sm *sm, const u8 *pmk, size_t pmk_len,
-		    const u8 *pmkid, const u8 *bssid)
+		    const u8 *pmkid, const u8 *spa, const u8 *aa)
 {
 	if (sm == NULL)
 		return;
@@ -3132,10 +3245,10 @@ void wpa_sm_set_pmk(struct wpa_sm *sm, const u8 *pmk, size_t pmk_len,
 	os_memcpy(sm->xxkey, pmk, pmk_len);
 #endif /* CONFIG_IEEE80211R */
 
-	if (bssid) {
+	if (aa) {
 		sm->cur_pmksa = pmksa_cache_add(sm->pmksa, pmk, pmk_len,
-						pmkid, NULL, 0, bssid,
-						sm->own_addr,
+						pmkid, NULL, 0, aa,
+						spa,
 						sm->network_ctx, sm->key_mgmt,
 						NULL);
 	}
@@ -3848,6 +3961,16 @@ void wpa_sm_drop_sa(struct wpa_sm *sm)
 	os_memset(&sm->gtk_wnm_sleep, 0, sizeof(sm->gtk_wnm_sleep));
 	os_memset(&sm->igtk, 0, sizeof(sm->igtk));
 	os_memset(&sm->igtk_wnm_sleep, 0, sizeof(sm->igtk_wnm_sleep));
+#ifdef CONFIG_MTK_IEEE80211BE
+	os_memset(&sm->bigtk, 0, sizeof(sm->bigtk));
+	os_memset(&sm->bigtk_wnm_sleep, 0, sizeof(sm->bigtk_wnm_sleep));
+	os_memset(&sm->ml_gtk, 0, sizeof(sm->ml_gtk));
+	os_memset(&sm->ml_gtk_wnm_sleep, 0, sizeof(sm->ml_gtk_wnm_sleep));
+	os_memset(&sm->ml_igtk, 0, sizeof(sm->ml_igtk));
+	os_memset(&sm->ml_igtk_wnm_sleep, 0, sizeof(sm->ml_igtk_wnm_sleep));
+	os_memset(&sm->ml_bigtk, 0, sizeof(sm->ml_bigtk));
+	os_memset(&sm->ml_bigtk_wnm_sleep, 0, sizeof(sm->ml_bigtk_wnm_sleep));
+#endif /* CONFIG_MTK_IEEE80211BE */
 #ifdef CONFIG_IEEE80211R
 	os_memset(sm->xxkey, 0, sizeof(sm->xxkey));
 	sm->xxkey_len = 0;
@@ -4583,7 +4706,7 @@ static int fils_ft_build_assoc_req_rsne(struct wpa_sm *sm, struct wpabuf *buf)
 			  sm->r0kh_id, sm->r0kh_id_len);
 	if (wpa_derive_pmk_r0(sm->fils_ft, sm->fils_ft_len, sm->ssid,
 			      sm->ssid_len, sm->mobility_domain,
-			      sm->r0kh_id, sm->r0kh_id_len, sm->own_addr,
+			      sm->r0kh_id, sm->r0kh_id_len, ml_sm_spa(sm, sm->own_addr),
 			      sm->pmk_r0, sm->pmk_r0_name, use_sha384) < 0) {
 		wpa_printf(MSG_WARNING, "FILS+FT: Could not derive PMK-R0");
 		return -1;
@@ -4592,7 +4715,7 @@ static int fils_ft_build_assoc_req_rsne(struct wpa_sm *sm, struct wpabuf *buf)
 	wpa_printf(MSG_DEBUG, "FILS+FT: R1KH-ID: " MACSTR,
 		   MAC2STR(sm->r1kh_id));
 	pos = wpabuf_put(buf, WPA_PMK_NAME_LEN);
-	if (wpa_derive_pmk_r1_name(sm->pmk_r0_name, sm->r1kh_id, sm->own_addr,
+	if (wpa_derive_pmk_r1_name(sm->pmk_r0_name, sm->r1kh_id, ml_sm_spa(sm, sm->own_addr),
 				   sm->pmk_r1_name, use_sha384) < 0) {
 		wpa_printf(MSG_WARNING, "FILS+FT: Could not derive PMKR1Name");
 		return -1;

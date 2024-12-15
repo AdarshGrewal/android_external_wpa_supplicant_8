@@ -78,9 +78,11 @@ static void add_mo_container(struct xml_node_ctx *ctx, xml_namespace_t *ns,
 	xml_node_t *node;
 	xml_node_t *fnode, *tnds;
 	char *str;
+	char file_name[300];
 
 	errno = 0;
-	fnode = node_from_file(ctx, fname);
+	snprintf(file_name, sizeof(file_name), "/data/misc/wifi/hs20/%s", fname);
+	fnode = node_from_file(ctx, file_name);
 	if (!fnode) {
 		wpa_printf(MSG_ERROR,
 			   "Failed to create XML node from file: %s, possible error: %s",

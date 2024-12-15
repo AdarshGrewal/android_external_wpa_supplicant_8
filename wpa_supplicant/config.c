@@ -679,6 +679,10 @@ static int wpa_config_parse_proto(const struct parse_data *data,
 			val |= WPA_PROTO_RSN;
 		else if (os_strcmp(start, "OSEN") == 0)
 			val |= WPA_PROTO_OSEN;
+#if CONFIG_WAPI_SUPPORT
+		else if (os_strcmp(start, "WAPI") == 0)
+			val |= WPA_PROTO_WAPI;
+#endif
 		else {
 			wpa_printf(MSG_ERROR, "Line %d: invalid proto '%s'",
 				   line, start);
@@ -807,6 +811,12 @@ static int wpa_config_parse_key_mgmt(const struct parse_data *data,
 		else if (os_strcmp(start, "FT-SAE") == 0)
 			val |= WPA_KEY_MGMT_FT_SAE;
 #endif /* CONFIG_SAE */
+#if CONFIG_WAPI_SUPPORT
+		else if (os_strcmp(start, "WAPI-PSK") == 0)
+			val |= WPA_KEY_MGMT_WAPI_PSK;
+		else if (os_strcmp(start, "WAPI-CERT") == 0)
+			val |= WPA_KEY_MGMT_WAPI_CERT;
+#endif
 #ifdef CONFIG_HS20
 		else if (os_strcmp(start, "OSEN") == 0)
 			val |= WPA_KEY_MGMT_OSEN;
@@ -2636,6 +2646,9 @@ static const struct parse_data ssid_fields[] = {
 	{ INT_RANGE(owe_ptk_workaround, 0, 1) },
 	{ INT_RANGE(multi_ap_backhaul_sta, 0, 1) },
 	{ INT_RANGE(ft_eap_pmksa_caching, 0, 1) },
+#if CONFIG_WAPI_SUPPORT
+	{ STR(wapi_cert_alias) },
+#endif
 	{ INT_RANGE(beacon_prot, 0, 1) },
 	{ INT_RANGE(transition_disable, 0, 255) },
 	{ INT_RANGE(sae_pk, 0, 2) },

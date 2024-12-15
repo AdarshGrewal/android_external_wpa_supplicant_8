@@ -18,6 +18,9 @@
 #include "notify.h"
 #include "scan.h"
 #include "bss.h"
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 static void wpa_bss_set_hessid(struct wpa_bss *bss)
 {
@@ -749,7 +752,7 @@ void wpa_bss_update_scan_res(struct wpa_supplicant *wpa_s,
 			     struct wpa_scan_res *res,
 			     struct os_reltime *fetch_time)
 {
-	const u8 *ssid, *p2p, *mesh;
+	const u8 *ssid, *p2p, *mesh, *ml_ie;
 	struct wpa_bss *bss;
 
 	if (wpa_s->conf->ignore_old_scan_res) {
@@ -822,6 +825,22 @@ void wpa_bss_update_scan_res(struct wpa_supplicant *wpa_s,
 
 	if (bss == NULL)
 		return;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	os_memcpy(bss->aa, bss->bssid, ETH_ALEN);
+	ml_ie = ml_get_ie(wpa_bss_ie_ptr(bss), bss->ie_len, ML_CTRL_TYPE_BASIC);
+	if (ml_ie) {
+		struct wpa_ml_ie_parse ml;
+
+		if (ml_parse_ie(&ml_ie[3], ml_ie[1] - 1, &ml, MSG_DEBUG) == 0) {
+			os_memcpy(bss->aa, ml.ml_addr, ETH_ALEN);
+			wpa_printf(MSG_DEBUG,
+				"ML: BSS[" MACSTR "] set AA[" MACSTR "]",
+				MAC2STR(bss->bssid), MAC2STR(ml.ml_addr));
+		}
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 	if (wpa_s->last_scan_res_used >= wpa_s->last_scan_res_size) {
 		struct wpa_bss **n;
 		unsigned int siz;

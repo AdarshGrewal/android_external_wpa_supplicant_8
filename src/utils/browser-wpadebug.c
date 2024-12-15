@@ -99,6 +99,8 @@ int hs20_web_browser(const char *url, int ignore_tls)
 		char *argv[14];
 		char *envp[] = { "PATH=/system/bin:/vendor/bin", NULL };
 
+		wpa_printf(MSG_INFO, "[MTK]before start am");
+
 		argv[0] = "browser-wpadebug";
 		argv[1] = "start";
 		argv[2] = "-a";

@@ -149,6 +149,10 @@ struct p2p_device {
 	struct wpabuf *go_neg_conf;
 
 	int sd_pending_bcast_queries;
+
+ #ifdef CONFIG_MTK_IEEE80211BE
+	u8 ml_capa;
+ #endif
 };
 
 struct p2p_sd_query {
@@ -562,6 +566,11 @@ struct p2p_data {
 	bool p2p_6ghz_capable;
 	bool include_6ghz;
 	bool allow_6ghz;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	u16 ml_peer_freq;
+	bool ml_capa;
+#endif
 };
 
 /**
@@ -667,6 +676,11 @@ struct p2p_message {
 
 	const u8 *pref_freq_list;
 	size_t pref_freq_list_len;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	u16 ml_peer_freq;
+	u8 ml_capa;
+#endif
 };
 
 

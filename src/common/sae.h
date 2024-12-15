@@ -114,6 +114,11 @@ struct sae_data {
 	unsigned int h2e:1;
 	unsigned int pk:1;
 	struct sae_temporary_data *tmp;
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 dot11MultiLinkActivated;
+	u8 own_ml_addr[ETH_ALEN];
+	u8 peer_ml_addr[ETH_ALEN];
+#endif /* CONFIG_MTK_IEEE80211BE */
 };
 
 int sae_set_group(struct sae_data *sae, int group);

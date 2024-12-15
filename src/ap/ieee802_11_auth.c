@@ -218,6 +218,18 @@ int hostapd_allowed_address(struct hostapd_data *hapd, const u8 *addr,
 
 	os_memset(out, 0, sizeof(*out));
 
+#ifdef CONFIG_MTK_P2P_CONN
+	if (is_probe_req) {
+		/* [ALPS06182322] Some IOT devices may use different mac other
+		 * than p2p mac to send probe requests and expect to get
+		 * probe responses from GO before starting its connection
+		 * process. For IOT compatibility, we will just allow probe
+		 * requests to be processed anyway.
+		 */
+		return HOSTAPD_ACL_ACCEPT;
+	}
+#endif
+
 	res = hostapd_check_acl(hapd, addr, &out->vlan_id);
 	if (res != HOSTAPD_ACL_PENDING)
 		return res;

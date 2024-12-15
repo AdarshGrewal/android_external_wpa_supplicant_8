@@ -15,7 +15,9 @@
 #include "wps/wps_defs.h"
 #include "p2p_i.h"
 #include "p2p.h"
-
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 static int p2p_go_det(u8 own_intent, u8 peer_value)
 {
@@ -183,6 +185,12 @@ static struct wpabuf * p2p_build_go_neg_req(struct p2p_data *p2p,
 	p2p_buf_add_device_info(buf, p2p, peer);
 	p2p_buf_add_operating_channel(buf, p2p->cfg->country,
 				      p2p->op_reg_class, p2p->op_channel);
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_p2p_is_ml_capa(p2p)) {
+		ml_p2p_buf_add_ml_capa(buf);
+		ml_p2p_buf_add_ml_prefer_freq_list(buf, p2p);
+	}
+#endif
 	p2p_buf_update_ie_hdr(buf, len);
 
 	p2p_buf_add_pref_channel_list(buf, p2p->pref_freq_list,
@@ -345,6 +353,12 @@ static struct wpabuf * p2p_build_go_neg_resp(struct p2p_data *p2p,
 		p2p_buf_add_group_id(buf, p2p->cfg->dev_addr, p2p->ssid,
 				     p2p->ssid_len);
 	}
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_p2p_is_ml_capa(p2p)) {
+		ml_p2p_buf_add_ml_capa(buf);
+		ml_p2p_buf_add_ml_prefer_freq_list(buf, p2p);
+	}
+#endif
 	p2p_buf_update_ie_hdr(buf, len);
 
 	/* WPS IE with Device Password ID attribute */
@@ -1000,6 +1014,13 @@ void p2p_process_go_neg_req(struct p2p_data *p2p, const u8 *sa,
 		if (go && p2p_go_select_channel(p2p, dev, &status) < 0)
 			goto fail;
 
+#ifdef CONFIG_MTK_IEEE80211BE
+		p2p->ml_capa = (ml_p2p_is_ml_capa(p2p) && msg.ml_capa) ? true : false;
+		p2p->ml_peer_freq = msg.ml_peer_freq;
+		p2p_dbg(p2p, "ML: Set ml capability: %d, peer freq: %u",
+			p2p->ml_capa, p2p->ml_peer_freq);
+#endif
+
 		dev->go_state = go ? LOCAL_GO : REMOTE_GO;
 		dev->oper_freq = p2p_channel_to_freq(msg.operating_channel[3],
 						     msg.operating_channel[4]);
@@ -1380,6 +1401,13 @@ void p2p_process_go_neg_resp(struct p2p_data *p2p, const u8 *sa,
 
 	p2p_dbg(p2p, "GO Negotiation with " MACSTR, MAC2STR(sa));
 	os_memcpy(dev->intended_addr, msg.intended_addr, ETH_ALEN);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	p2p->ml_capa = (ml_p2p_is_ml_capa(p2p) && msg.ml_capa) ? true : false;
+	p2p->ml_peer_freq = msg.ml_peer_freq;
+	p2p_dbg(p2p, "ML: Set ml capability: %d, peer freq: %u",
+		p2p->ml_capa, p2p->ml_peer_freq);
+#endif
 
 fail:
 	/* Store GO Negotiation Confirmation to allow retransmission */

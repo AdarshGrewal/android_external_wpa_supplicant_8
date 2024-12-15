@@ -24,6 +24,9 @@ enum wpas_p2p_channel_update_trig {
 	WPAS_P2P_CHANNEL_UPDATE_AVOID,
 	WPAS_P2P_CHANNEL_UPDATE_DISALLOW,
 	WPAS_P2P_CHANNEL_UPDATE_CS,
+#ifdef CONFIG_MTK_P2P_6G
+	WPAS_P2P_CHANNEL_UPDATE_6GHZ_BAND_CAPABLE,
+#endif
 };
 
 int wpas_p2p_add_p2pdev_interface(struct wpa_supplicant *wpa_s,

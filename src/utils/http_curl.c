@@ -1319,6 +1319,7 @@ static CURLcode curl_cb_ssl(CURL *curl, void *sslctx, void *parm)
 	wpa_printf(MSG_DEBUG, "curl_cb_ssl");
 	SSL_CTX_set_app_data(ssl, ctx);
 	SSL_CTX_set_verify(ssl, SSL_VERIFY_PEER, curl_cb_ssl_verify);
+	SSL_CTX_enable_ocsp_stapling(ssl);
 
 #ifdef HAVE_OCSP
 	if (ctx->ocsp != NO_OCSP) {
@@ -1626,11 +1627,14 @@ int http_download_file(struct http_ctx *ctx, const char *url,
 	wpa_printf(MSG_DEBUG, "curl: Download file from %s to %s (ca=%s)",
 		   url, fname, ca_fname);
 	curl = curl_easy_init();
-	if (curl == NULL)
+	if (curl == NULL) {
+		wpa_printf(MSG_ERROR, "[MTK] curl is NULL");
 		return -1;
+	}
 
 	f = fopen(fname, "wb");
 	if (f == NULL) {
+		wpa_printf(MSG_ERROR, "[MTK] fopen %s failed(%d)", fname, errno);
 		curl_easy_cleanup(curl);
 		return -1;
 	}

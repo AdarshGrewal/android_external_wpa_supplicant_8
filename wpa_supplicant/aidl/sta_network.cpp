@@ -1011,26 +1011,6 @@ ndk::ScopedAStatus StaNetwork::setPskPassphraseInternal(const std::string &rawPs
 {
 	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
 	std::string psk = rawPsk;
-#ifdef CONFIG_WAPI_INTERFACE
-	if (wpa_ssid->key_mgmt & WPA_KEY_MGMT_WAPI_PSK) {
-		if (rawPsk.size() > 2 && rawPsk.front()== '"' && rawPsk.back() == '"') {
-			psk = rawPsk.substr(1, rawPsk.size() - 2);
-		} else {
-			if ((rawPsk.size() & 1)) {
-				return createStatus(SupplicantStatusCode::FAILURE_ARGS_INVALID);
-			}
-			size_t len = psk.size() / 2;
-			uint8_t *buf = (uint8_t *) os_malloc(len);
-			if (hexstr2bin(psk.c_str(), buf, len) < 0) {
-					os_free(buf);
-				return createStatus(SupplicantStatusCode::FAILURE_ARGS_INVALID);
-			}
-			std::vector<uint8_t> bytes(buf, buf + len);
-			os_free(buf);
-			return setWapiPskInternal(bytes);
-		}
-	}
-#endif
 	if (isPskPassphraseValid(psk)) {
 		return createStatus(SupplicantStatusCode::FAILURE_ARGS_INVALID);
 	}
@@ -1406,6 +1386,12 @@ ndk::ScopedAStatus StaNetwork::setWapiCertSuiteInternal(const std::string &suite
 #ifdef CONFIG_WAPI_INTERFACE
 	// Dummy implementation
 	dummyWapiCertSuite = suite;
+#ifdef CONFIG_WAPI_SUPPORT
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (setStringFieldAndResetState(suite.c_str(), &(wpa_ssid->wapi_cert_alias), "suite")) {
+		return createStatus(SupplicantStatusCode::FAILURE_UNKNOWN);
+	}
+#endif
 	return ndk::ScopedAStatus::ok();
 #else
 	return createStatusWithMsg(SupplicantStatusCode::FAILURE_UNKNOWN, "Not implemented");
@@ -1467,29 +1453,6 @@ StaNetwork::getAuthAlgInternal()
 std::pair<std::string, ndk::ScopedAStatus> StaNetwork::getPskPassphraseInternal()
 {
 	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
-#ifdef CONFIG_WAPI_INTERFACE
-	if (wpa_ssid->key_mgmt & WPA_KEY_MGMT_WAPI_PSK) {
-		if (wpa_ssid->psk_set) {
-			std::pair<std::vector<uint8_t>, ndk::ScopedAStatus> ret = getWapiPskInternal();
-			std::string psk;
-			char buf[3] = {0};
-			for (int i = 0; i < ret.second.size(); i++) {
-				snprintf(buf, sizeof(buf), "%02x", ret.second[i]);
-				psk.append(buf);
-			}
-			return {psk, ndk::ScopedAStatus::ok()};
-		} else {
-			if (!wpa_ssid->passphrase) {
-				return {"", createStatus(SupplicantStatusCode::FAILURE_UNKNOWN)};
-			}
-			std::string passphrase;
-			passphrase.append("\"");
-			passphrase.append(wpa_ssid->passphrase);
-			passphrase.append("\"");
-			return {passphrase, ndk::ScopedAStatus::ok()};
-		}
-	}
-#endif
 	if (!wpa_ssid->passphrase) {
 		return {"", createStatus(SupplicantStatusCode::FAILURE_UNKNOWN)};
 	}

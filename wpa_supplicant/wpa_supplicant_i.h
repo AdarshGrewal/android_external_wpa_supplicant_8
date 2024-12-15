@@ -21,6 +21,9 @@
 #include "wmm_ac.h"
 #include <netinet/in.h>
 #include <netinet/in6.h>
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ap/hostapd.h"
+#endif
 
 extern const char *const wpa_supplicant_version;
 extern const char *const wpa_supplicant_license;
@@ -312,6 +315,11 @@ struct wpa_global {
 	unsigned int pending_group_iface_for_p2ps:1;
 	unsigned int p2p_go_found_external_scan:1;
 	unsigned int pending_p2ps_group_freq;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	struct hapd_interfaces hapd_ifaces;
+	struct wpa_supplicant *p2p_dual_go;
+#endif
 
 #ifdef CONFIG_WIFI_DISPLAY
 	int wifi_display;
@@ -976,6 +984,7 @@ struct wpa_supplicant {
 	unsigned int connection_ht:1;
 	unsigned int connection_vht:1;
 	unsigned int connection_he:1;
+	unsigned int connection_eht:1;
 	unsigned int connection_max_nss_rx:4;
 	unsigned int connection_max_nss_tx:4;
 	unsigned int connection_channel_bandwidth:5;
@@ -1189,6 +1198,7 @@ struct wpa_supplicant {
 	unsigned int p2p_go_max_oper_chwidth;
 	unsigned int p2p_go_vht_center_freq2;
 	int p2p_lo_started;
+
 #endif /* CONFIG_P2P */
 
 	struct wpa_ssid *bgscan_ssid;

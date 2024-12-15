@@ -68,6 +68,9 @@
 #include "ap/ap_config.h"
 #include "ap/hostapd.h"
 #endif /* CONFIG_MESH */
+#ifdef CONFIG_WAPI_SUPPORT
+#include "wapi.h"
+#endif
 
 const char *const wpa_supplicant_version =
 "wpa_supplicant v" VERSION_STR "\n"
@@ -583,6 +586,11 @@ static void wpa_supplicant_cleanup(struct wpa_supplicant *wpa_s)
 	pmksa_candidate_free(wpa_s->wpa);
 	ptksa_cache_deinit(wpa_s->ptksa);
 	wpa_s->ptksa = NULL;
+
+#if CONFIG_WAPI_SUPPORT
+	wapi_deinit(wpa_s);
+#endif
+
 	wpa_sm_deinit(wpa_s->wpa);
 	wpa_s->wpa = NULL;
 	wpa_bssid_ignore_clear(wpa_s);
@@ -1774,7 +1782,7 @@ int wpa_supplicant_set_suites(struct wpa_supplicant *wpa_s,
 			wpa_hexdump_key(MSG_MSGDUMP, "PSK (set in config)",
 					ssid->psk, PMK_LEN);
 			wpa_sm_set_pmk(wpa_s->wpa, ssid->psk, PMK_LEN, NULL,
-				       NULL);
+				       NULL, NULL);
 			psk_set = 1;
 		}
 
@@ -1790,7 +1798,7 @@ int wpa_supplicant_set_suites(struct wpa_supplicant *wpa_s,
 				    4096, psk, PMK_LEN);
 		        wpa_hexdump_key(MSG_MSGDUMP, "PSK (from passphrase)",
 					psk, PMK_LEN);
-			wpa_sm_set_pmk(wpa_s->wpa, psk, PMK_LEN, NULL, NULL);
+			wpa_sm_set_pmk(wpa_s->wpa, psk, PMK_LEN, NULL, NULL, NULL);
 			psk_set = 1;
 			os_memset(psk, 0, sizeof(psk));
 		}
@@ -1829,7 +1837,7 @@ int wpa_supplicant_set_suites(struct wpa_supplicant *wpa_s,
 						"external passphrase)",
 						psk, PMK_LEN);
 				wpa_sm_set_pmk(wpa_s->wpa, psk, PMK_LEN, NULL,
-					       NULL);
+					       NULL, NULL);
 				psk_set = 1;
 				os_memset(psk, 0, sizeof(psk));
 			} else
@@ -1846,7 +1854,7 @@ int wpa_supplicant_set_suites(struct wpa_supplicant *wpa_s,
 						"PSK (from external PSK)",
 						psk, PMK_LEN);
 				wpa_sm_set_pmk(wpa_s->wpa, psk, PMK_LEN, NULL,
-					       NULL);
+					       NULL, NULL);
 				psk_set = 1;
 				os_memset(psk, 0, sizeof(psk));
 			} else {
@@ -2779,9 +2787,11 @@ skip_to_6ghz:
 				    freq->channel, ssid->enable_edmg,
 				    ssid->edmg_channel, freq->ht_enabled,
 				    vht_freq.vht_enabled, freq->he_enabled,
+				    false,
 				    freq->sec_channel_offset,
 				    chwidth, seg0, seg1, vht_caps,
-				    &mode->he_capab[ieee80211_mode]) != 0)
+				    &mode->he_capab[ieee80211_mode],
+				    NULL) != 0)
 		return;
 
 	*freq = vht_freq;
@@ -3047,6 +3057,15 @@ static u8 * wpas_populate_assoc_ies(
 			params->wps = WPS_MODE_OPEN;
 		wpa_s->wpa_proto = 0;
 #endif /* CONFIG_WPS */
+#ifdef CONFIG_WAPI_SUPPORT
+	} else if (ssid->key_mgmt & (WPA_KEY_MGMT_WAPI_CERT | WPA_KEY_MGMT_WAPI_PSK)) {
+		if (wapi_set_suites(wpa_s, ssid, bss, wpa_ie, &wpa_ie_len) < 0) {
+			wpa_msg(wpa_s, MSG_WARNING, "WPA: Failed to set WAPI "
+				"key management and encryption suites");
+			wpas_connect_work_done(wpa_s);
+			return NULL;
+		}
+#endif
 	} else {
 		wpa_supplicant_set_non_wpa_policy(wpa_s, ssid);
 		wpa_ie_len = 0;
@@ -4084,6 +4103,16 @@ static void wpas_start_assoc_cb(struct wpa_radio_work *work, int deinit)
 			/* give IBSS a bit more time */
 			timeout = ssid->mode == WPAS_MODE_IBSS ? 20 : 10;
 		}
+#ifdef CONFIG_WAPI_SUPPORT
+		if (wpa_s->wpa_proto == WPA_PROTO_WAPI) {
+			wpa_s->current_ssid = ssid;
+			wpa_printf(MSG_DEBUG,
+				"[WAPI] set WAPI Auth Time in 35 secs"
+				" and not to initiate eapol\n");
+			wpa_supplicant_req_auth_timeout(wpa_s, 35, 0);
+			return;
+		}
+#endif
 		wpa_supplicant_req_auth_timeout(wpa_s, timeout, 0);
 	}
 
@@ -8317,8 +8346,22 @@ int get_shared_radio_freqs_data(struct wpa_supplicant *wpa_s,
 		"Determining shared radio frequencies (max len %u)", len);
 	os_memset(freqs_data, 0, sizeof(struct wpa_used_freq_data) * len);
 
+/*
+ * In current MTK driver implementation, virtual interfaces wlan0 and p2p0
+ * use different radio names. However, per Supplicant's design, different
+ * virtual interfaces can share freq data only if they were added to the
+ * same radio. To work around this issue, we will need to iterate global
+ * interfaces instead of the interfaces in the radio in order to get
+ * p2p connection in SCC mode.
+ */
+#ifdef CONFIG_MTK_SCC
+	for (ifs = wpa_s->global->ifaces; ifs; ifs = ifs->next) {
+		if (ifs != wpa_s && os_strcmp(ifs->ifname, "p2p0") == 0)
+			continue;
+#else
 	dl_list_for_each(ifs, &wpa_s->radio->ifaces, struct wpa_supplicant,
 			 radio_list) {
+#endif
 		if (idx == len)
 			break;
 

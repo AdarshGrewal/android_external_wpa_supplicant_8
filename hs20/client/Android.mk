@@ -28,7 +28,7 @@ endif
 
 L_CFLAGS += -DCONFIG_CTRL_IFACE
 L_CFLAGS += -DCONFIG_CTRL_IFACE_UNIX
-L_CFLAGS += -DCONFIG_CTRL_IFACE_CLIENT_DIR=\"/data/misc/wifi/sockets\"
+L_CFLAGS += -DCONFIG_CTRL_IFACE_CLIENT_DIR=\"/data/vendor/wifi/wpa/sockets\"
 
 OBJS = spp_client.c
 OBJS += oma_dm_client.c
@@ -47,7 +47,7 @@ OBJS += ../../src/utils/xml_libxml2.c
 OBJS += ../../src/utils/http_curl.c
 OBJS += ../../src/utils/base64.c
 OBJS += ../../src/utils/os_unix.c
-L_CFLAGS += -DCONFIG_DEBUG_FILE
+L_CFLAGS += -DCONFIG_ANDROID_LOG
 OBJS += ../../src/utils/wpa_debug.c
 OBJS += ../../src/utils/common.c
 OBJS += ../../src/crypto/crypto_internal.c
@@ -67,14 +67,17 @@ LOCAL_MODULE := hs20-osu-client
 LOCAL_LICENSE_KINDS := SPDX-license-identifier-BSD
 LOCAL_LICENSE_CONDITIONS := notice
 LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE
+LOCAL_PROPRIETARY_MODULE := false
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_SHARED_LIBRARIES := libc libcutils
 LOCAL_SHARED_LIBRARIES += libcrypto libssl
 #LOCAL_SHARED_LIBRARIES += libxml2
 LOCAL_STATIC_LIBRARIES += libxml2
-LOCAL_SHARED_LIBRARIES += libicuuc
+LOCAL_SHARED_LIBRARIES += libandroidicu
 LOCAL_SHARED_LIBRARIES += libcurl
+LOCAL_SHARED_LIBRARIES += liblog
+
 
 LOCAL_CFLAGS := $(L_CFLAGS)
 LOCAL_SRC_FILES := $(OBJS)

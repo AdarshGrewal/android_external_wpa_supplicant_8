@@ -13,7 +13,9 @@
 #include "common/ieee802_11_common.h"
 #include "wps/wps_i.h"
 #include "p2p_i.h"
-
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 void p2p_copy_filter_devname(char *dst, size_t dst_len,
 			     const void *src, size_t src_len)
@@ -398,6 +400,32 @@ static int p2p_parse_attribute(u8 id, const u8 *data, u16 len,
 					msg->persistent_ssid_len));
 		break;
 	}
+#ifdef CONFIG_MTK_IEEE80211BE
+	case P2P_ATTR_VENDOR_SPECIFIC:
+	{
+		if (len < 4) {
+			wpa_printf(MSG_DEBUG, "ML: Too short MTK vendor "
+				   "attribute (length %d)", len);
+			break;
+		}
+
+		if (WPA_GET_BE24(data) != OUI_MTK)
+			break;
+
+		if (data[3] == MTK_VENDOR_ATTR_P2P_ML_FREQ_LIST) {
+			msg->ml_peer_freq = WPA_GET_LE16(data + 4);
+			msg->ml_capa = 1;
+			wpa_printf(MSG_DEBUG, "ML: Peer freq: %u",
+				msg->ml_peer_freq);
+		} else if (data[3] == MTK_VENDOR_ATTR_P2P_ML_CAPA) {
+			msg->ml_capa = data[4];
+			wpa_printf(MSG_DEBUG, "ML: Peer ml capa: %d",
+				msg->ml_capa);
+		}
+		break;
+	}
+#endif
+
 	default:
 		wpa_printf(MSG_DEBUG, "P2P: Skipped unknown attribute %d "
 			   "(length %d)", id, len);

@@ -56,6 +56,9 @@
 #include "airtime_policy.h"
 #include "wpa_auth_kay.h"
 
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
 #ifdef CONFIG_WEP
@@ -379,6 +382,11 @@ void hostapd_free_hapd_data(struct hostapd_data *hapd)
 	wpa_printf(MSG_DEBUG, "%s(%s)", __func__, hapd->conf->iface);
 	accounting_deinit(hapd);
 	hostapd_deinit_wpa(hapd);
+#ifdef CONFIG_MTK_IEEE80211BE
+	ml_group_deinit(hapd);
+	wpabuf_free(hapd->ml_probe_resp_ie);
+	hapd->ml_probe_resp_ie = NULL;
+#endif /* CONFIG_MTK_IEEE80211BE */
 	vlan_deinit(hapd);
 	hostapd_acl_deinit(hapd);
 #ifndef CONFIG_NO_RADIUS
@@ -1335,6 +1343,13 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 		return -1;
 	}
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_group_init(hapd)) {
+		wpa_printf(MSG_ERROR, "ML group initialization failed");
+		return -1;
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 #ifdef CONFIG_INTERWORKING
 	if (gas_serv_init(hapd)) {
 		wpa_printf(MSG_ERROR, "GAS server initialization failed");
@@ -2067,6 +2082,7 @@ static int hostapd_setup_interface_complete_sync(struct hostapd_iface *iface,
 				     hapd->iconf->ieee80211n,
 				     hapd->iconf->ieee80211ac,
 				     hapd->iconf->ieee80211ax,
+				     hapd->iconf->ieee80211be,
 				     hapd->iconf->secondary_channel,
 				     hostapd_get_oper_chwidth(hapd->iconf),
 				     hostapd_get_oper_centr_freq_seg0_idx(
@@ -2831,7 +2847,7 @@ int hostapd_disable_iface(struct hostapd_iface *hapd_iface)
 }
 
 
-static struct hostapd_iface *
+struct hostapd_iface *
 hostapd_iface_alloc(struct hapd_interfaces *interfaces)
 {
 	struct hostapd_iface **iface, *hapd_iface;
@@ -3452,12 +3468,14 @@ static int hostapd_change_config_freq(struct hostapd_data *hapd,
 				    conf->channel, conf->enable_edmg,
 				    conf->edmg_channel, conf->ieee80211n,
 				    conf->ieee80211ac, conf->ieee80211ax,
-				    conf->secondary_channel,
+				    conf->ieee80211be, conf->secondary_channel,
 				    hostapd_get_oper_chwidth(conf),
 				    hostapd_get_oper_centr_freq_seg0_idx(conf),
 				    hostapd_get_oper_centr_freq_seg1_idx(conf),
 				    conf->vht_capab,
 				    mode ? &mode->he_capab[IEEE80211_MODE_AP] :
+				    NULL,
+				    mode ? &mode->eht_capab[IEEE80211_MODE_AP] :
 				    NULL))
 		return -1;
 
@@ -3545,11 +3563,12 @@ static int hostapd_fill_csa_settings(struct hostapd_data *hapd,
 		    &hapd->iface->cs_oper_class,
 		    &chan) == NUM_HOSTAPD_MODES) {
 		wpa_printf(MSG_DEBUG,
-			   "invalid frequency for channel switch (freq=%d, sec_channel_offset=%d, vht_enabled=%d, he_enabled=%d)",
+			   "invalid frequency for channel switch (freq=%d, sec_channel_offset=%d, vht_enabled=%d, he_enabled=%d, eht_enabled=%d)",
 			   settings->freq_params.freq,
 			   settings->freq_params.sec_channel_offset,
 			   settings->freq_params.vht_enabled,
-			   settings->freq_params.he_enabled);
+			   settings->freq_params.he_enabled,
+			   settings->freq_params.eht_enabled);
 		return -1;
 	}
 
@@ -3606,6 +3625,11 @@ void hostapd_cleanup_cs_params(struct hostapd_data *hapd)
 void hostapd_chan_switch_config(struct hostapd_data *hapd,
 				struct hostapd_freq_params *freq_params)
 {
+	if (freq_params->eht_enabled)
+		hapd->iconf->ch_switch_eht_config |= CH_SWITCH_EHT_ENABLED;
+	else
+		hapd->iconf->ch_switch_eht_config |= CH_SWITCH_EHT_DISABLED;
+
 	if (freq_params->he_enabled)
 		hapd->iconf->ch_switch_he_config |= CH_SWITCH_HE_ENABLED;
 	else
@@ -3618,7 +3642,8 @@ void hostapd_chan_switch_config(struct hostapd_data *hapd,
 
 	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
 		       HOSTAPD_LEVEL_INFO,
-		       "CHAN_SWITCH HE config 0x%x VHT config 0x%x",
+		       "CHAN_SWITCH EHT config 0x%x HE config 0x%x VHT config 0x%x",
+		       hapd->iconf->ch_switch_eht_config,
 		       hapd->iconf->ch_switch_he_config,
 		       hapd->iconf->ch_switch_vht_config);
 }
@@ -3696,6 +3721,7 @@ hostapd_switch_channel_fallback(struct hostapd_iface *iface,
 	iface->conf->ieee80211n = freq_params->ht_enabled;
 	iface->conf->ieee80211ac = freq_params->vht_enabled;
 	iface->conf->ieee80211ax = freq_params->he_enabled;
+	iface->conf->ieee80211be = freq_params->eht_enabled;
 
 	/*
 	 * cs_params must not be cleared earlier because the freq_params

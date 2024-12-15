@@ -778,6 +778,13 @@ void wpas_notify_p2p_group_started(struct wpa_supplicant *wpa_s,
 				   struct wpa_ssid *ssid, int persistent,
 				   int client, const u8 *ip)
 {
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (wpa_s->global->p2p_dual_go == wpa_s) {
+		wpa_printf(MSG_DEBUG, "ML: Don't notify 2nd GO group");
+		return;
+	}
+#endif
+
 	/* Notify a group has been started */
 	wpas_dbus_register_p2p_group(wpa_s, ssid);
 

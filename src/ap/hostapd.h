@@ -81,6 +81,9 @@ struct hapd_interfaces {
        unsigned char ctrl_iface_cookie[CTRL_IFACE_COOKIE_LEN];
 #endif /* CONFIG_CTRL_IFACE_UDP */
 
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 ml_group_idx;
+#endif
 };
 
 enum hostapd_chan_status {
@@ -221,6 +224,11 @@ struct hostapd_data {
 #endif /* CONFIG_FULL_DYNAMIC_VLAN */
 
 	struct l2_packet_data *l2;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	struct wpa_ml_group *ml_group;
+	struct wpabuf *ml_probe_resp_ie;
+#endif
 
 #ifdef CONFIG_IEEE80211R_AP
 	struct dl_list l2_queue;
@@ -630,6 +638,8 @@ int hostapd_disable_iface(struct hostapd_iface *hapd_iface);
 void hostapd_bss_deinit_no_free(struct hostapd_data *hapd);
 void hostapd_free_hapd_data(struct hostapd_data *hapd);
 void hostapd_cleanup_iface_partial(struct hostapd_iface *iface);
+struct hostapd_iface *
+hostapd_iface_alloc(struct hapd_interfaces *interfaces);
 int hostapd_add_iface(struct hapd_interfaces *ifaces, char *buf);
 int hostapd_remove_iface(struct hapd_interfaces *ifaces, char *buf);
 void hostapd_channel_list_updated(struct hostapd_iface *iface, int initiator);

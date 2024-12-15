@@ -314,6 +314,12 @@ ifdef CONFIG_IEEE80211AC
 L_CFLAGS += -DCONFIG_IEEE80211AC
 endif
 
+ifdef CONFIG_IEEE80211BE
+CONFIG_IEEE80211AX=y
+L_CFLAGS += -DCONFIG_IEEE80211BE
+OBJS += src/ap/ieee802_11_eht.c
+endif
+
 ifdef CONFIG_IEEE80211AX
 L_CFLAGS += -DCONFIG_IEEE80211AX
 endif
@@ -1142,6 +1148,23 @@ L_CFLAGS += -DCONFIG_CTRL_IFACE_AIDL
 L_CPPFLAGS = -Wall -Werror
 endif
 endif
+
+############ MTK CONFIG START ############
+# Important!!! DO NOT add L_CFLAGS before the very first L_CFLAGS.
+# Otherwise, your configurations will not be defined.
+
+# Save PMKID generated in hostapd to driver
+ifdef CONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+L_CFLAGS += -DCONFIG_HOSTAPD_PMKID_IN_DRIVER_SUPPORT
+endif
+
+# Support MLO
+ifdef CONFIG_MTK_IEEE80211BE
+OBJS += src/ml/ml.c
+L_CFLAGS += -DCONFIG_MTK_IEEE80211BE
+endif
+
+############ MTK CONFIG END ############
 
 ########################
 

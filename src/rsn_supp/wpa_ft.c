@@ -22,6 +22,9 @@
 #include "wpa_ie.h"
 #include "pmksa_cache.h"
 
+/* CONFIG_MTK_IEEE80211BE */
+#include "ml/ml.h"
+
 #ifdef CONFIG_IEEE80211R
 
 #ifdef CONFIG_PASN
@@ -57,12 +60,12 @@ int wpa_derive_ptk_ft(struct wpa_sm *sm, const unsigned char *src_addr,
 	sm->pmk_r0_len = use_sha384 ? SHA384_MAC_LEN : PMK_LEN;
 	if (wpa_derive_pmk_r0(mpmk, mpmk_len, sm->ssid,
 			      sm->ssid_len, sm->mobility_domain,
-			      sm->r0kh_id, sm->r0kh_id_len, sm->own_addr,
+			      sm->r0kh_id, sm->r0kh_id_len, ml_sm_spa(sm, sm->own_addr),
 			      sm->pmk_r0, sm->pmk_r0_name, use_sha384) < 0)
 		return -1;
 	sm->pmk_r1_len = sm->pmk_r0_len;
 	if (wpa_derive_pmk_r1(sm->pmk_r0, sm->pmk_r0_len, sm->pmk_r0_name,
-			      sm->r1kh_id, sm->own_addr, sm->pmk_r1,
+			      sm->r1kh_id, ml_sm_spa(sm, sm->own_addr), sm->pmk_r1,
 			      sm->pmk_r1_name) < 0)
 		return -1;
 
@@ -76,7 +79,8 @@ int wpa_derive_ptk_ft(struct wpa_sm *sm, const unsigned char *src_addr,
 		kdk_len = 0;
 
 	return wpa_pmk_r1_to_ptk(sm->pmk_r1, sm->pmk_r1_len, sm->snonce, anonce,
-				 sm->own_addr, sm->bssid, sm->pmk_r1_name, ptk,
+				 ml_sm_spa(sm, sm->own_addr), ml_sm_aa(sm, sm->bssid),
+				 sm->pmk_r1_name, ptk,
 				 ptk_name, sm->key_mgmt, sm->pairwise_cipher,
 				 kdk_len);
 }
@@ -426,7 +430,8 @@ static u8 * wpa_ft_gen_req_ies(struct wpa_sm *sm, size_t *len,
 		*elem_count = 3 + ieee802_11_ie_count(ric_ies, ric_ies_len);
 		if (rsnxe_len)
 			*elem_count += 1;
-		if (wpa_ft_mic(kck, kck_len, sm->own_addr, target_ap, 5,
+		if (wpa_ft_mic(kck, kck_len, ml_sm_spa(sm, sm->own_addr),
+			       ml_sm_aa(sm, target_ap), 5,
 			       ((u8 *) mdie) - 2, 2 + sizeof(*mdie),
 			       ftie_pos, 2 + *ftie_len,
 			       (u8 *) rsnie, 2 + rsnie->len, ric_ies,
@@ -662,7 +667,7 @@ int wpa_ft_process_response(struct wpa_sm *sm, const u8 *ies, size_t ies_len,
 	wpa_hexdump(MSG_DEBUG, "FT: ANonce", anonce, WPA_NONCE_LEN);
 	os_memcpy(sm->anonce, anonce, WPA_NONCE_LEN);
 	if (wpa_derive_pmk_r1(sm->pmk_r0, sm->pmk_r0_len, sm->pmk_r0_name,
-			      sm->r1kh_id, sm->own_addr, sm->pmk_r1,
+			      sm->r1kh_id, ml_sm_spa(sm, sm->own_addr), sm->pmk_r1,
 			      sm->pmk_r1_name) < 0)
 		return -1;
 	sm->pmk_r1_len = sm->pmk_r0_len;
@@ -679,7 +684,7 @@ int wpa_ft_process_response(struct wpa_sm *sm, const u8 *ies, size_t ies_len,
 		kdk_len = 0;
 
 	if (wpa_pmk_r1_to_ptk(sm->pmk_r1, sm->pmk_r1_len, sm->snonce,
-			      anonce, sm->own_addr, bssid,
+			      anonce, ml_sm_spa(sm, sm->own_addr), ml_sm_aa(sm, bssid),
 			      sm->pmk_r1_name, &sm->ptk, ptk_name, sm->key_mgmt,
 			      sm->pairwise_cipher,
 			      kdk_len) < 0)
@@ -1135,7 +1140,8 @@ int wpa_ft_validate_reassoc_resp(struct wpa_sm *sm, const u8 *ies,
 		kck_len = sm->ptk.kck_len;
 	}
 
-	if (wpa_ft_mic(kck, kck_len, sm->own_addr, src_addr, 6,
+	if (wpa_ft_mic(kck, kck_len, ml_sm_spa(sm, sm->own_addr),
+		       ml_sm_aa(sm, src_addr), 6,
 		       parse.mdie - 2, parse.mdie_len + 2,
 		       parse.ftie - 2, parse.ftie_len + 2,
 		       parse.rsn - 2, parse.rsn_len + 2,
@@ -1228,6 +1234,19 @@ int wpa_ft_validate_reassoc_resp(struct wpa_sm *sm, const u8 *ies,
 #endif /* CONFIG_OCV */
 
 	sm->ft_reassoc_completed = 1;
+
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (sm->dot11MultiLinkActivated &&
+	   (parse.gtk != NULL || parse.igtk != NULL || parse.bigtk != NULL ||
+	    ml_ft_process_gtk_subelem(sm, parse.mlo_gtk, parse.mlo_gtk_len,
+				      parse.mlo_gtk_num) < 0 ||
+	    ml_ft_process_igtk_subelem(sm, parse.mlo_igtk, parse.mlo_igtk_len,
+				      parse.mlo_igtk_num) < 0 ||
+	    ml_ft_process_bigtk_subelem(sm, parse.mlo_bigtk, parse.mlo_bigtk_len,
+					parse.mlo_bigtk_num) < 0))
+		return -1;
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	if (wpa_ft_process_gtk_subelem(sm, parse.gtk, parse.gtk_len) < 0 ||
 	    wpa_ft_process_igtk_subelem(sm, parse.igtk, parse.igtk_len) < 0 ||

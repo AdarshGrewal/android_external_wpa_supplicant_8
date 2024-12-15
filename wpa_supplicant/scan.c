@@ -18,12 +18,15 @@
 #include "wps_supplicant.h"
 #include "p2p_supplicant.h"
 #include "p2p/p2p.h"
+#include "p2p/p2p_i.h"
 #include "hs20_supplicant.h"
 #include "notify.h"
 #include "bss.h"
 #include "scan.h"
 #include "mesh.h"
-
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif
 
 static void wpa_supplicant_gen_assoc_event(struct wpa_supplicant *wpa_s)
 {
@@ -430,6 +433,12 @@ static void wpa_supplicant_optimize_freqs(
 			params->freqs = os_calloc(2, sizeof(int));
 			if (params->freqs)
 				params->freqs[0] = wpa_s->go_params->freq;
+#ifdef CONFIG_MTK_IEEE80211BE
+			/* Optimize scan base on GO addr */
+			wpa_dbg(wpa_s, MSG_DEBUG, "P2P: Scan peer iface addr " MACSTR,
+				MAC2STR(wpa_s->go_params->peer_interface_addr));
+			params->bssid = wpa_s->go_params->peer_interface_addr;
+#endif
 		} else if (wpa_s->p2p_in_provisioning < 8 &&
 			   wpa_s->go_params->freq_list[0]) {
 			wpa_dbg(wpa_s, MSG_DEBUG, "P2P: Scan only common "
@@ -645,6 +654,12 @@ static struct wpabuf * wpa_supplicant_extra_ies(struct wpa_supplicant *wpa_s)
 		size_t ielen = p2p_scan_ie_buf_len(wpa_s->global->p2p);
 		if (wpabuf_resize(&extra_ie, ielen) == 0)
 			wpas_p2p_scan_ie(wpa_s, extra_ie);
+#ifdef CONFIG_MTK_IEEE80211BE
+		if (wpa_s->global->p2p->ml_capa) {
+			if (wpabuf_resize(&extra_ie, 7) == 0)
+				ml_build_ml_probe_req(extra_ie, 0);
+		}
+#endif
 	}
 #endif /* CONFIG_P2P */
 
@@ -1384,6 +1399,17 @@ scan:
 		 * since the 6 GHz band is disabled for P2P uses. */
 		wpa_printf(MSG_DEBUG,
 			   "P2P: 6 GHz disabled - update the scan frequency list");
+
+#ifdef CONFIG_MTK_P2P_6G
+		/* We should add 2.4G/5G channels only once. Otherwise, we may
+		 * get an error code -22 (Invalid argument) when triggering the
+		 * scan request to kernel.
+		 */
+		wpa_add_scan_freqs_list(wpa_s, HOSTAPD_MODE_IEEE80211G, &params,
+					0);
+		wpa_add_scan_freqs_list(wpa_s, HOSTAPD_MODE_IEEE80211A, &params,
+					0);
+#else
 		for (i = 0; i < wpa_s->hw.num_modes; i++) {
 			if (wpa_s->hw.modes[i].num_channels == 0)
 				continue;
@@ -1400,6 +1426,7 @@ scan:
 					wpa_s, HOSTAPD_MODE_IEEE80211AD,
 					&params, false);
 		}
+#endif
 	}
 #endif /* CONFIG_P2P */
 
@@ -2720,6 +2747,20 @@ wpa_supplicant_get_scan_results(struct wpa_supplicant *wpa_s,
 
 	scan_res = wpa_drv_get_scan_results2(wpa_s);
 	if (scan_res == NULL) {
+#ifdef CONFIG_MTK_P2P_CONN
+/*
+ * [ALPS04965675] P2P: Reject scan trigger since one is already pending
+ * In case scan result fetch failed for some reason (e.g. Out of memory),
+ * we will have to free previous p2p_scan_work. Otherwise, the following
+ * p2p_scan_work will not be able to trigger because supplicant thinks
+ * previous p2p_scan_work was not finished yet.
+ */
+		if (wpa_s->p2p_scan_work) {
+			struct wpa_radio_work *work = wpa_s->p2p_scan_work;
+			wpa_s->p2p_scan_work = NULL;
+			radio_work_done(work);
+		}
+#endif
 		wpa_dbg(wpa_s, MSG_DEBUG, "Failed to get scan results");
 		return NULL;
 	}

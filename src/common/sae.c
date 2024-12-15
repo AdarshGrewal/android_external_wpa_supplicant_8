@@ -20,6 +20,9 @@
 #include "dragonfly.h"
 #include "sae.h"
 
+#ifdef CONFIG_MTK_IEEE80211BE
+#include "ml/ml.h"
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 int sae_set_group(struct sae_data *sae, int group)
 {
@@ -119,12 +122,33 @@ void sae_clear_temp_data(struct sae_data *sae)
 
 void sae_clear_data(struct sae_data *sae)
 {
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 dot11MultiLinkActivated;
+	u8 own_ml_addr[ETH_ALEN];
+	u8 peer_ml_addr[ETH_ALEN];
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 	if (sae == NULL)
 		return;
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	/* backup */
+	dot11MultiLinkActivated = sae->dot11MultiLinkActivated;
+	os_memcpy(own_ml_addr, sae->own_ml_addr, ETH_ALEN);
+	os_memcpy(peer_ml_addr, sae->peer_ml_addr, ETH_ALEN);
+#endif /* CONFIG_MTK_IEEE80211BE */
+
 	sae_clear_temp_data(sae);
 	crypto_bignum_deinit(sae->peer_commit_scalar, 0);
 	crypto_bignum_deinit(sae->peer_commit_scalar_accepted, 0);
 	os_memset(sae, 0, sizeof(*sae));
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	/* restore */
+	sae->dot11MultiLinkActivated = dot11MultiLinkActivated;
+	os_memcpy(sae->own_ml_addr, own_ml_addr, ETH_ALEN);
+	os_memcpy(sae->peer_ml_addr, peer_ml_addr, ETH_ALEN);
+#endif /* CONFIG_MTK_IEEE80211BE */
 }
 
 
@@ -1839,15 +1863,16 @@ static void sae_parse_commit_token(struct sae_data *sae, const u8 **pos,
 
 
 static void sae_parse_token_container(struct sae_data *sae,
-				      const u8 *pos, const u8 *end,
+				      const u8 **pos, const u8 *end,
 				      const u8 **token, size_t *token_len)
 {
 	wpa_hexdump(MSG_DEBUG, "SAE: Possible elements at the end of the frame",
-		    pos, end - pos);
-	if (!sae_is_token_container_elem(pos, end))
+		    *pos, end - *pos);
+	if (!sae_is_token_container_elem(*pos, end))
 		return;
-	*token = pos + 3;
-	*token_len = pos[1] - 1;
+	*token = *pos + 3;
+	*token_len = (*pos)[1] - 1;
+	*pos += *token_len + 3;
 	wpa_hexdump(MSG_DEBUG, "SAE: Anti-Clogging Token (in container)",
 		    *token, *token_len);
 }
@@ -2131,7 +2156,14 @@ u16 sae_parse_commit(struct sae_data *sae, const u8 *data, size_t len,
 
 	/* Optional Anti-Clogging Token Container element */
 	if (h2e)
-		sae_parse_token_container(sae, pos, end, token, token_len);
+		sae_parse_token_container(sae, &pos, end, token, token_len);
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	res = ml_sae_process_auth(sae, 1, pos, end - pos);
+	if (res < 0) {
+		return WLAN_STATUS_UNSPECIFIED_FAILURE;
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	/*
 	 * Check whether peer-commit-scalar and PEER-COMMIT-ELEMENT are same as
@@ -2340,6 +2372,13 @@ int sae_check_confirm(struct sae_data *sae, const u8 *data, size_t len)
 				 len - 2 - hash_len) < 0)
 		return -1;
 #endif /* CONFIG_SAE_PK */
+
+#ifdef CONFIG_MTK_IEEE80211BE
+	if (ml_sae_process_auth(sae, 2, data + 2 + hash_len,
+				len - 2 - hash_len) < 0) {
+		return -1;
+	}
+#endif /* CONFIG_MTK_IEEE80211BE */
 
 	return 0;
 }

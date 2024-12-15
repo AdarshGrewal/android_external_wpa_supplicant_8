@@ -200,6 +200,15 @@ struct he_capabilities {
 	u16 he_6ghz_capa;
 };
 
+/* struct eht_capabilities - IEEE 802.11be EHT capabilities */
+struct eht_capabilities {
+	bool eht_supported;
+	u16 mac_cap;
+	u8 phy_cap[EHT_PHY_CAPAB_LEN];
+	u8 mcs[EHT_MCS_NSS_CAPAB_LEN];
+	u8 ppet[EHT_PPE_THRESH_CAPAB_LEN];
+};
+
 #define HOSTAPD_MODE_FLAG_HT_INFO_KNOWN BIT(0)
 #define HOSTAPD_MODE_FLAG_VHT_INFO_KNOWN BIT(1)
 
@@ -298,6 +307,11 @@ struct hostapd_hw_modes {
 	 * for IEEE 802.11ay EDMG configuration.
 	 */
 	struct ieee80211_edmg_config edmg;
+
+	/**
+	 * eht_capab - EHT (IEEE 802.11be) capabilities
+	 */
+	struct eht_capabilities eht_capab[IEEE80211_MODE_NUM];
 };
 
 
@@ -776,6 +790,11 @@ struct hostapd_freq_params {
 	 * bandwidth - Channel bandwidth in MHz (20, 40, 80, 160)
 	 */
 	int bandwidth;
+
+	/**
+	 * eht_enabled - Whether EHT is enabled
+	 */
+	bool eht_enabled;
 
 	/**
 	 * This structure describes the most essential parameters needed
@@ -2200,6 +2219,8 @@ struct hostapd_sta_add_params {
 	const struct ieee80211_he_capabilities *he_capab;
 	size_t he_capab_len;
 	const struct ieee80211_he_6ghz_band_cap *he_6ghz_capab;
+	const struct ieee80211_eht_capabilities *eht_capab;
+	size_t eht_capab_len;
 	u32 flags; /* bitmask of WPA_STA_* flags */
 	u32 flags_mask; /* unset bits in flags */
 #ifdef CONFIG_MESH
@@ -2467,6 +2488,9 @@ struct drv_acs_params {
 
 	/* Indicates whether EDMG is enabled */
 	int edmg_enabled;
+
+	/* Indicates whether EHT is enabled */
+	bool eht_enabled;
 };
 
 struct wpa_bss_trans_info {
@@ -2536,6 +2560,11 @@ struct external_auth {
 	unsigned int key_mgmt_suite;
 	u16 status;
 	const u8 *pmkid;
+#ifdef CONFIG_MTK_IEEE80211BE
+	u8 dot11MultiLinkActivated;
+	const u8 *own_ml_addr;
+	const u8 *peer_ml_addr;
+#endif /* CONFIG_MTK_IEEE80211BE */
 };
 
 /* enum nested_attr - Used to specify if subcommand uses nested attributes */

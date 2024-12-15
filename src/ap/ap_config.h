@@ -537,6 +537,7 @@ struct hostapd_bss_config {
 	bool disable_11n;
 	bool disable_11ac;
 	bool disable_11ax;
+	bool disable_11be;
 
 	/* IEEE 802.11v */
 	int time_advertisement;
@@ -937,6 +938,15 @@ struct spatial_reuse {
 };
 
 /**
+ * struct eht_phy_capabilities_info - EHT PHY capabilities
+ */
+struct eht_phy_capabilities_info {
+	bool su_beamformer;
+	bool su_beamformee;
+	bool mu_beamformer;
+};
+
+/**
  * struct hostapd_config - Per-radio interface configuration
  */
 struct hostapd_config {
@@ -1102,11 +1112,27 @@ struct hostapd_config {
 	unsigned int airtime_update_interval;
 #define AIRTIME_MODE_MAX (__AIRTIME_MODE_MAX - 1)
 #endif /* CONFIG_AIRTIME_POLICY */
+
+	int ieee80211be;
+#ifdef CONFIG_IEEE80211BE
+	u8 eht_oper_chwidth;
+	u8 eht_oper_centr_freq_seg0_idx;
+	struct eht_phy_capabilities_info eht_phy_capab;
+#endif /* CONFIG_IEEE80211BE */
+
+	/* EHT enable/disable config from CHAN_SWITCH */
+#define CH_SWITCH_EHT_ENABLED BIT(0)
+#define CH_SWITCH_EHT_DISABLED BIT(1)
+	unsigned int ch_switch_eht_config;
 };
 
 
 static inline u8 hostapd_get_oper_chwidth(struct hostapd_config *conf)
 {
+#ifdef CONFIG_IEEE80211BE
+	if (conf->ieee80211be)
+		return conf->eht_oper_chwidth;
+#endif /* CONFIG_IEEE80211BE */
 #ifdef CONFIG_IEEE80211AX
 	if (conf->ieee80211ax)
 		return conf->he_oper_chwidth;
@@ -1117,6 +1143,10 @@ static inline u8 hostapd_get_oper_chwidth(struct hostapd_config *conf)
 static inline void
 hostapd_set_oper_chwidth(struct hostapd_config *conf, u8 oper_chwidth)
 {
+#ifdef CONFIG_IEEE80211BE
+	if (conf->ieee80211be)
+		conf->eht_oper_chwidth = oper_chwidth;
+#endif /* CONFIG_IEEE80211BE */
 #ifdef CONFIG_IEEE80211AX
 	if (conf->ieee80211ax)
 		conf->he_oper_chwidth = oper_chwidth;
@@ -1127,6 +1157,10 @@ hostapd_set_oper_chwidth(struct hostapd_config *conf, u8 oper_chwidth)
 static inline u8
 hostapd_get_oper_centr_freq_seg0_idx(struct hostapd_config *conf)
 {
+#ifdef CONFIG_IEEE80211BE
+	if (conf->ieee80211be)
+		return conf->eht_oper_centr_freq_seg0_idx;
+#endif /* CONFIG_IEEE80211BE */
 #ifdef CONFIG_IEEE80211AX
 	if (conf->ieee80211ax)
 		return conf->he_oper_centr_freq_seg0_idx;
@@ -1138,6 +1172,10 @@ static inline void
 hostapd_set_oper_centr_freq_seg0_idx(struct hostapd_config *conf,
 				     u8 oper_centr_freq_seg0_idx)
 {
+#ifdef CONFIG_IEEE80211BE
+	if (conf->ieee80211be)
+		conf->eht_oper_centr_freq_seg0_idx = oper_centr_freq_seg0_idx;
+#endif /* CONFIG_IEEE80211BE */
 #ifdef CONFIG_IEEE80211AX
 	if (conf->ieee80211ax)
 		conf->he_oper_centr_freq_seg0_idx = oper_centr_freq_seg0_idx;

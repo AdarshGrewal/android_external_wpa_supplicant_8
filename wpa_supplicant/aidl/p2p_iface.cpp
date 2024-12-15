@@ -441,7 +441,11 @@ int joinScanReq(
 
 static bool is6GhzAllowed(struct wpa_supplicant *wpa_s) {
 	if (!wpa_s->global->p2p) return false;
+#ifdef CONFIG_MTK_P2P_6G
+	return !wpa_s->global->p2p->cfg->p2p_6ghz_disable;
+#else
 	return wpa_s->global->p2p->allow_6ghz;
+#endif
 }
 
 int joinGroup(
